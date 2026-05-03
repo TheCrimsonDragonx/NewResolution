@@ -10,6 +10,12 @@ class Priority(str, Enum):
     normal = "normal"
 
 
+class OperatorRole(str, Enum):
+    commander = "commander"
+    pilot     = "pilot"
+    observer  = "observer"
+
+
 class DroneStatus(str, Enum):
     idle = "idle"
     active = "active"
@@ -93,6 +99,15 @@ class FireZone(BaseModel):
     radiusM: int      # meters
     spreadRate: float # km/h
     active: bool = True
+    region_id: Optional[str] = None
+
+
+class Operator(BaseModel):
+    id: str
+    name: str
+    role: OperatorRole
+    assigned_drone_id:  Optional[str] = None
+    assigned_region_id: Optional[str] = None
 
 
 class MeshStatus(BaseModel):
@@ -104,6 +119,25 @@ class MeshStatus(BaseModel):
 # ---------------------------------------------------------------------------
 # Optimizer I/O models
 # ---------------------------------------------------------------------------
+
+class SimBounds(BaseModel):
+    lat_min: float
+    lat_max: float
+    lng_min: float
+    lng_max: float
+
+
+class SimState(BaseModel):
+    tick: int
+    rows: int
+    cols: int
+    wind_deg: float
+    wind_speed: float
+    burning_count: int
+    burnt_count: int
+    cells: list[list[int]]   # rows × cols, values: 0=empty 1=burning 2=burnt
+    bounds: SimBounds
+
 
 class OptimizerRequest(BaseModel):
     drones: Optional[list[str]] = None      # drone IDs to consider; None = all available

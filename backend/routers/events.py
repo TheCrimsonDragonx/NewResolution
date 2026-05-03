@@ -1,15 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from datetime import datetime
 import uuid
-from models import Event
+from models import Event, Operator
+from deps import get_operator
+import filters
 import state
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.get("/")
-def list_events(limit: int = 20) -> list[Event]:
-    return state.events[-limit:]
+def list_events(limit: int = 20, op: Operator = Depends(get_operator)) -> list[dict]:
+    return filters.filter_events(state.events[-limit:], op)
 
 
 @router.post("/", status_code=201)

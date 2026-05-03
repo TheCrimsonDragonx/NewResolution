@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "source": "NASA FIRMS VIIRS SNPP NRT",
+    "product": "VIIRS_SNPP_NRT",
+    "area": "-121.545,36.500,-121.515,36.530",
+    "acq_date": "2025-10-14",
+    "note": "Pre-cached for demo reliability. Toggle live data via FIRMS_MAP_KEY env var."
+  },
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5283, 36.5198]},
+      "properties": {
+        "latitude": "36.5198", "longitude": "-121.5283",
+        "brightness": "331.5", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "h", "version": "2.0NRT",
+        "bright_t31": "291.3", "frp": "12.9", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5268, 36.5195]},
+      "properties": {
+        "latitude": "36.5195", "longitude": "-121.5268",
+        "brightness": "318.3", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "n", "version": "2.0NRT",
+        "bright_t31": "284.2", "frp": "8.1", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5248, 36.5182]},
+      "properties": {
+        "latitude": "36.5182", "longitude": "-121.5248",
+        "brightness": "341.2", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "h", "version": "2.0NRT",
+        "bright_t31": "295.8", "frp": "15.6", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5242, 36.5178]},
+      "properties": {
+        "latitude": "36.5178", "longitude": "-121.5242",
+        "brightness": "326.8", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "h", "version": "2.0NRT",
+        "bright_t31": "289.1", "frp": "11.4", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5253, 36.5175]},
+      "properties": {
+        "latitude": "36.5175", "longitude": "-121.5253",
+        "brightness": "309.4", "scan": "0.38", "track": "0.37",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "n", "version": "2.0NRT",
+        "bright_t31": "281.6", "frp": "5.8", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5352, 36.5112]},
+      "properties": {
+        "latitude": "36.5112", "longitude": "-121.5352",
+        "brightness": "315.7", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "n", "version": "2.0NRT",
+        "bright_t31": "283.4", "frp": "6.7", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5338, 36.5108]},
+      "properties": {
+        "latitude": "36.5108", "longitude": "-121.5338",
+        "brightness": "322.1", "scan": "0.38", "track": "0.37",
+        "acq_date": "2025-10-14", "acq_time": "0158",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "h", "version": "2.0NRT",
+        "bright_t31": "287.9", "frp": "9.3", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5275, 36.5201]},
+      "properties": {
+        "latitude": "36.5201", "longitude": "-121.5275",
+        "brightness": "345.8", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "2215",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "h", "version": "2.0NRT",
+        "bright_t31": "298.2", "frp": "18.3", "daynight": "N"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-121.5261, 36.5188]},
+      "properties": {
+        "latitude": "36.5188", "longitude": "-121.5261",
+        "brightness": "333.9", "scan": "0.37", "track": "0.36",
+        "acq_date": "2025-10-14", "acq_time": "2215",
+        "satellite": "N", "instrument": "VIIRS",
+        "confidence": "h", "version": "2.0NRT",
+        "bright_t31": "292.7", "frp": "13.1", "daynight": "N"
+      }
+    }
+  ]
+}

@@ -4,22 +4,28 @@ Nothing is persisted to disk, sent to a database, or sent to any external servic
 """
 from __future__ import annotations
 import uuid
+from typing import Optional
 from models import (
     Region, Event, Mission, Location, Volume, TightestConstraint,
     Drone, DronePosition, FireZone, MeshStatus,
     Priority, DroneStatus, ConnectionStatus,
+    Operator, OperatorRole,
 )
+from fire_sim import FireGrid
 
 regions: dict[str, Region] = {}
 events: list[Event] = []
 missions: dict[str, Mission] = {}
 drones: dict[str, Drone] = {}
 fire_zones: dict[str, FireZone] = {}
+operators: dict[str, Operator] = {}
 mesh: MeshStatus = MeshStatus(
     radio=ConnectionStatus.ok,
     pingStation=ConnectionStatus.ok,
     network=ConnectionStatus.ok,
 )
+fire_grid: Optional[FireGrid] = None
+last_optimizer_fire_count: int = 0
 
 
 def seed() -> None:
@@ -78,16 +84,25 @@ def seed() -> None:
     ]:
         drones[d.id] = d
 
-    # Fire zones — correspond to red circles in the dashboard map
+    # Fire zones — tagged with region_id for pilot scoping
     for fz in [
         FireZone(id="FIRE-01", location=Location(lat=36.5200, lng=-121.5280),
-                 severity=Priority.critical, radiusM=450, spreadRate=3.2),
+                 severity=Priority.critical, radiusM=450, spreadRate=3.2, region_id="east"),
         FireZone(id="FIRE-02", location=Location(lat=36.5180, lng=-121.5240),
-                 severity=Priority.critical, radiusM=380, spreadRate=2.8),
+                 severity=Priority.critical, radiusM=380, spreadRate=2.8, region_id="east"),
         FireZone(id="FIRE-03", location=Location(lat=36.5110, lng=-121.5350),
-                 severity=Priority.high,     radiusM=220, spreadRate=1.1),
+                 severity=Priority.high,     radiusM=220, spreadRate=1.1, region_id="mid"),
     ]:
         fire_zones[fz.id] = fz
+
+    # Operators — one per role, linked to existing seed data
+    for op in [
+        Operator(id="op-cmd-01", name="Commander Hayes", role=OperatorRole.commander),
+        Operator(id="op-plt-04", name="Pilot Rivera",    role=OperatorRole.pilot,
+                 assigned_drone_id="UAS-04", assigned_region_id="east"),
+        Operator(id="op-obs-01", name="Observer Chen",   role=OperatorRole.observer),
+    ]:
+        operators[op.id] = op
 
     # Mesh — matches dashboard MOCK_MESH
     global mesh
@@ -96,3 +111,15 @@ def seed() -> None:
         pingStation=ConnectionStatus.ok,
         network=ConnectionStatus.ok,
     )
+
+    # Fire simulation — seed ignition points from FIRMS cache, then from fire zones
+    global fire_grid, last_optimizer_fire_count
+    fire_grid = FireGrid(wind_deg=225.0, wind_speed=20.0, p_base=0.28, burn_duration=5)
+    from nasa_firms import load_cached, firms_ignition_points
+    firms_data = load_cached()
+    for lat, lng in firms_ignition_points(firms_data):
+        fire_grid.ignite_at(lat, lng, radius_cells=0)
+    # Also seed ignition at each fire zone center (in case FIRMS points are sparse)
+    for fz in fire_zones.values():
+        fire_grid.ignite_at(fz.location.lat, fz.location.lng, radius_cells=1)
+    last_optimizer_fire_count = fire_grid.burning_count()

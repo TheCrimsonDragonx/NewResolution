@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import OperatorSelector from './OperatorSelector';
 
 const BACKEND = 'http://localhost:8000';
 
@@ -22,6 +23,30 @@ const RESOLUTION_NAV = [
   { id: 'status',   label: 'Status' },
 ];
 
+const ROLE_BADGE_COLOR = {
+  commander: '#ea580c',
+  pilot:     '#2563eb',
+  observer:  '#52525b',
+};
+
+// ---------------------------------------------------------------------------
+// Map coordinate helpers
+// SVG viewBox: 0 0 360 320
+// Salinas test-site bbox: lat 36.500–36.530, lng -121.545–-121.515
+// ---------------------------------------------------------------------------
+const MAP_LAT_MAX = 36.530;
+const MAP_LAT_MIN = 36.500;
+const MAP_LNG_MIN = -121.545;
+const MAP_LNG_MAX = -121.515;
+const SVG_W = 360;
+const SVG_H = 320;
+
+function latLngToSvg(lat, lng) {
+  const x = ((lng - MAP_LNG_MIN) / (MAP_LNG_MAX - MAP_LNG_MIN)) * SVG_W;
+  const y = ((MAP_LAT_MAX - lat) / (MAP_LAT_MAX - MAP_LAT_MIN)) * SVG_H;
+  return [x, y];
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -29,43 +54,109 @@ const RESOLUTION_NAV = [
 export default function DashboardPage() {
   const [activeNav, setActiveNav] = useState('operation');
 
-  const [regions,  setRegions]  = useState([]);
-  const [events,   setEvents]   = useState([]);
-  const [mission,  setMission]  = useState(null);
-  const [mesh,     setMesh]     = useState(null);
-  const [backendOk, setBackendOk] = useState(null); // null=loading, true=ok, false=error
+  const [operator,    setOperator]    = useState(null);
+  const [regions,     setRegions]     = useState([]);
+  const [events,      setEvents]      = useState([]);
+  const [mission,     setMission]     = useState(null);
+  const [mesh,        setMesh]        = useState(null);
+  const [drones,      setDrones]      = useState([]);
+  const [simState,    setSimState]    = useState(null);
+  const [optFlash,    setOptFlash]    = useState(false);   // optimizer-triggered flash
+  const [backendOk,   setBackendOk]   = useState(null);    // null=loading, true=ok, false=error
 
-  async function fetchAll() {
+  const prevBurningRef = useRef(0);
+
+  // Restore operator from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('wildfire_operator');
+    if (stored) setOperator(JSON.parse(stored));
+  }, []);
+
+  function apiFetch(path, op) {
+    const activeOp = op ?? operator;
+    return fetch(`${BACKEND}${path}`, {
+      headers: activeOp ? { 'X-Operator-ID': activeOp.id } : {},
+    });
+  }
+
+  async function fetchAll(op) {
     try {
-      const [regRes, evtRes, msnRes, meshRes] = await Promise.all([
+      const [regRes, evtRes, msnRes, meshRes, droneRes] = await Promise.all([
         fetch(`${BACKEND}/regions/`),
-        fetch(`${BACKEND}/events/?limit=5`),
-        fetch(`${BACKEND}/missions/`),
+        apiFetch('/events/?limit=8', op),
+        apiFetch('/missions/', op),
         fetch(`${BACKEND}/mesh`),
+        apiFetch('/drones/', op),
       ]);
 
-      const [regs, evts, missions, meshData] = await Promise.all([
+      const [regs, evts, missions, meshData, dronesData] = await Promise.all([
         regRes.json(),
         evtRes.json(),
         msnRes.json(),
         meshRes.json(),
+        droneRes.json(),
       ]);
 
       setRegions(regs);
       setEvents(evts);
-      setMission(missions[0] ?? null);   // use first active mission
+      setMission(missions[0] ?? null);
       setMesh(meshData);
+      setDrones(dronesData);
       setBackendOk(true);
     } catch {
       setBackendOk(false);
     }
   }
 
+  // Poll main data every 5s
   useEffect(() => {
-    fetchAll();
-    const interval = setInterval(fetchAll, 5000); // poll every 5 s
+    if (!operator) return;
+    fetchAll(operator);
+    const interval = setInterval(() => fetchAll(operator), 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [operator]);
+
+  // Poll fire simulation state every 2s; auto-trigger optimizer on significant fire growth
+  useEffect(() => {
+    if (!operator) return;
+    async function fetchSim() {
+      try {
+        const res = await fetch(`${BACKEND}/fires/simulation/state`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setSimState(data);
+
+        // Auto-trigger optimizer when burning cell count grows by 15+ cells
+        const prev = prevBurningRef.current;
+        if (data.burning_count - prev >= 15) {
+          prevBurningRef.current = data.burning_count;
+          fetch(`${BACKEND}/optimizer/run`, {
+            method: 'POST',
+            headers: { 'X-Operator-ID': operator.id, 'Content-Type': 'application/json' },
+            body: '{}',
+          }).catch(() => {});
+          setOptFlash(true);
+          setTimeout(() => setOptFlash(false), 2000);
+        } else if (prev === 0 && data.burning_count > 0) {
+          prevBurningRef.current = data.burning_count;
+        }
+      } catch { /* backend not ready yet */ }
+    }
+    fetchSim();
+    const interval = setInterval(fetchSim, 2000);
+    return () => clearInterval(interval);
+  }, [operator]);
+
+  if (!operator) {
+    return (
+      <OperatorSelector
+        onSelect={(op) => {
+          setOperator(op);
+          fetchAll(op);
+        }}
+      />
+    );
+  }
 
   if (backendOk === false) {
     return (
@@ -87,15 +178,25 @@ export default function DashboardPage() {
     );
   }
 
+  function switchOperator() {
+    localStorage.removeItem('wildfire_operator');
+    setOperator(null);
+    setMission(null);
+    setMesh(null);
+    setDrones([]);
+    setSimState(null);
+    setBackendOk(null);
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col font-sans overflow-hidden text-zinc-100" style={{ background: '#1a1a1a' }}>
-      <StatusBar mission={mission} mesh={mesh} />
+      <StatusBar mission={mission} mesh={mesh} operator={operator} simState={simState} optFlash={optFlash} onSwitch={switchOperator} />
       <div className="flex-1 flex min-h-0">
         <NavRail active={activeNav} onChange={setActiveNav} />
-        <OperationSetup mission={mission} />
-        <MapView regions={regions} />
+        <OperationSetup mission={mission} operator={operator} />
+        <MapView regions={regions} drones={drones} simState={simState} />
       </div>
-      <ResolutionPanel regions={regions} events={events} mission={mission} />
+      <ResolutionPanel regions={regions} events={events} mission={mission} drones={drones} operator={operator} simState={simState} optFlash={optFlash} />
     </div>
   );
 }
@@ -104,7 +205,8 @@ export default function DashboardPage() {
 // Top status bar
 // ---------------------------------------------------------------------------
 
-function StatusBar({ mission, mesh }) {
+function StatusBar({ mission, mesh, operator, simState, optFlash, onSwitch }) {
+  const badgeColor = ROLE_BADGE_COLOR[operator.role] ?? '#52525b';
   return (
     <div className="flex items-center justify-between px-4 py-2.5 border-b text-xs flex-shrink-0" style={{ borderColor: '#2a2a2a' }}>
       <div className="flex items-center gap-2">
@@ -113,11 +215,38 @@ function StatusBar({ mission, mesh }) {
         <span className="text-zinc-500 font-mono">
           {new Date().toLocaleTimeString('en-US', { hour12: false })}
         </span>
+        <span
+          className="px-2 py-0.5 rounded text-[9px] font-medium uppercase tracking-wide"
+          style={{ background: badgeColor, color: '#fff' }}
+        >
+          {operator.role}
+        </span>
+        <span className="text-zinc-400">{operator.name}</span>
       </div>
       <div className="flex items-center gap-4">
+        {simState && (
+          <span className="font-mono text-[9px] text-zinc-500">
+            SIM·T{simState.tick}
+            <span className="ml-1" style={{ color: '#f97316' }}>{simState.burning_count}▲</span>
+            <span className="ml-1 text-zinc-600">{simState.burnt_count}■</span>
+          </span>
+        )}
+        {optFlash && (
+          <span className="px-2 py-0.5 rounded text-[9px] font-medium animate-pulse"
+            style={{ background: '#7c3aed', color: '#e9d5ff' }}>
+            OPT TRIGGERED
+          </span>
+        )}
         <MeshDot label="radio"       status={mesh.radio} />
         <MeshDot label="pingStation" status={mesh.pingStation} />
         <MeshDot label="network"     status={mesh.network} />
+        <button
+          onClick={onSwitch}
+          className="ml-2 px-2 py-0.5 rounded text-[9px] text-zinc-400 hover:text-zinc-100 transition"
+          style={{ border: '1px solid #3a3a3a' }}
+        >
+          Switch
+        </button>
       </div>
     </div>
   );
@@ -183,7 +312,8 @@ function NavItem({ item, active, onClick, accent }) {
 // Operation Setup panel
 // ---------------------------------------------------------------------------
 
-function OperationSetup({ mission }) {
+function OperationSetup({ mission, operator }) {
+  const isObserver = operator.role === 'observer';
   return (
     <div
       className="p-3 border-r text-[11px] flex-shrink-0"
@@ -192,37 +322,50 @@ function OperationSetup({ mission }) {
       <div className="text-zinc-400 text-[10px] mb-2">← Operation Setup</div>
       <div className="font-medium mb-3">LRZ</div>
 
-      <Field label="Location" mono>
-        {mission.location.lat.toFixed(4)}, {mission.location.lng.toFixed(4)}
-      </Field>
+      {mission.location ? (
+        <Field label="Location" mono>
+          {mission.location.lat.toFixed(4)}, {mission.location.lng.toFixed(4)}
+        </Field>
+      ) : (
+        <Field label="Location">
+          <span className="text-zinc-600">restricted</span>
+        </Field>
+      )}
 
-      <div className="font-medium mt-3 mb-2">Volume shape</div>
+      {!isObserver && mission.volume && (
+        <>
+          <div className="font-medium mt-3 mb-2">Volume shape</div>
 
-      <div className="flex justify-between items-center mb-2">
-        <span className="text-zinc-400">Display handles</span>
-        <Toggle checked />
-      </div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-zinc-400">Display handles</span>
+            <Toggle checked />
+          </div>
 
-      <div className="flex gap-1.5 mb-2 text-[10px]">
-        <Pill>{mission.volume.width} nmi</Pill>
-        <Pill>{mission.volume.height} nmi</Pill>
-      </div>
+          <div className="flex gap-1.5 mb-2 text-[10px]">
+            <Pill>{mission.volume.width} nmi</Pill>
+            <Pill>{mission.volume.height} nmi</Pill>
+          </div>
 
-      <FieldInline label="Min altitude">
-        <Pill>{mission.volume.minAlt} ft</Pill>
-      </FieldInline>
-      <FieldInline label="Max altitude">
-        <Pill>{mission.volume.maxAlt} ft</Pill>
-      </FieldInline>
+          <FieldInline label="Min altitude">
+            <Pill>{mission.volume.minAlt} ft</Pill>
+          </FieldInline>
+          <FieldInline label="Max altitude">
+            <Pill>{mission.volume.maxAlt} ft</Pill>
+          </FieldInline>
+        </>
+      )}
 
-      <div className="mt-3" />
-
-      <FieldInline label="Start time">
-        <Pill>{mission.startTime}</Pill>
-      </FieldInline>
-      <FieldInline label="Duration">
-        <Pill>{mission.duration} min</Pill>
-      </FieldInline>
+      {mission.startTime && (
+        <>
+          <div className="mt-3" />
+          <FieldInline label="Start time">
+            <Pill>{mission.startTime}</Pill>
+          </FieldInline>
+          <FieldInline label="Duration">
+            <Pill>{mission.duration} min</Pill>
+          </FieldInline>
+        </>
+      )}
     </div>
   );
 }
@@ -265,24 +408,63 @@ function Toggle({ checked }) {
 }
 
 // ---------------------------------------------------------------------------
-// Map view — SVG placeholder (Phase 2: swap in MapLibre + real GeoJSON)
-// Salinas test site center: 36.5124, -121.5365
+// Map view
+// Salinas bbox: lat 36.500–36.530, lng -121.545–-121.515
+// SVG viewBox: 0 0 360 320
 // ---------------------------------------------------------------------------
 
-function MapView({ regions }) {
+function MapView({ drones, simState }) {
+  const CELL_W = SVG_W / 30;
+  const CELL_H = SVG_H / 30;
+
+  // Derive drone SVG positions from live data (fall back to static if no position)
+  const dronePositions = drones
+    .filter(d => d.position && d.status !== 'grounded')
+    .map(d => {
+      const [x, y] = latLngToSvg(d.position.lat, d.position.lng);
+      return { ...d, svgX: x, svgY: y };
+    });
+
+  // Wind arrow direction (blowing toward)
+  const windArrow = simState
+    ? { deg: simState.wind_deg, speed: simState.wind_speed }
+    : { deg: 225, speed: 20 };
+  const windRad = (windArrow.deg * Math.PI) / 180;
+  const arrowLen = 10;
+  const ax = 340 + arrowLen * Math.sin(windRad);
+  const ay = 18  - arrowLen * Math.cos(windRad);
+
   return (
     <div className="flex-1 relative overflow-hidden" style={{ background: '#243a1a' }}>
       <svg viewBox="0 0 360 320" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 w-full h-full">
         <rect width="360" height="320" fill="#3a4a2a" />
 
+        {/* Terrain contour lines */}
         <path d="M 0 80 Q 90 60 180 100 T 360 90"   stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
         <path d="M 0 140 Q 100 130 200 150 T 360 160" stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
         <path d="M 0 210 Q 80 200 180 220 T 360 230" stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
 
+        {/* Priority zones */}
         <PriorityZone x={200} y={40}  w={160} h={120} priority="critical" label="east · critical" />
         <PriorityZone x={60}  y={100} w={140} h={120} priority="high"     label="mid · high" />
         <PriorityZone x={0}   y={220} w={200} h={100} priority="normal"   label="west · normal" />
 
+        {/* Fire CA grid overlay */}
+        {simState && simState.cells.flatMap((row, r) =>
+          row.map((cell, c) => {
+            if (cell === 0) return null;
+            const x = c * CELL_W;
+            const y = r * CELL_H;
+            const fill   = cell === 1 ? '#f97316' : '#57534e';
+            const opacity = cell === 1 ? 0.75 : 0.45;
+            return (
+              <rect key={`${r}-${c}`} x={x} y={y} width={CELL_W} height={CELL_H}
+                fill={fill} opacity={opacity} />
+            );
+          })
+        )}
+
+        {/* Mission boundary */}
         <rect x="80" y="60" width="200" height="200" fill="none" stroke="#e5e5e5" strokeWidth="1" strokeDasharray="3 3" />
         {[
           [76, 56], [176, 56], [276, 56],
@@ -292,26 +474,57 @@ function MapView({ regions }) {
           <rect key={i} x={x} y={y} width="8" height="8" fill="white" />
         ))}
 
-        <circle cx="240" cy="100" r="6" fill="#dc2626" />
-        <circle cx="280" cy="130" r="6" fill="#dc2626" />
-        <circle cx="140" cy="180" r="6" fill="#dc2626" />
-        <polygon points="160,200 165,210 155,210" fill="#3b82f6" />
-        <polygon points="200,120 205,130 195,130" fill="#3b82f6" />
-        <polygon points="260,150 265,160 255,160" fill="#3b82f6" />
+        {/* Live drone positions */}
+        {dronePositions.length > 0
+          ? dronePositions.map(d => (
+              <g key={d.id}>
+                <polygon
+                  points={`${d.svgX},${d.svgY - 7} ${d.svgX + 5},${d.svgY + 4} ${d.svgX - 5},${d.svgY + 4}`}
+                  fill="#3b82f6"
+                />
+                <text x={d.svgX} y={d.svgY + 14} fontSize="6" fill="#93c5fd" textAnchor="middle" fontFamily="monospace">
+                  {d.id}
+                </text>
+              </g>
+            ))
+          : (
+            // Static fallback if no live positions
+            <>
+              <polygon points="160,200 165,210 155,210" fill="#3b82f6" />
+              <polygon points="200,120 205,130 195,130" fill="#3b82f6" />
+              <polygon points="260,150 265,160 255,160" fill="#3b82f6" />
+            </>
+          )
+        }
 
-        <text x="320" y="305" fontSize="8" fill="#a3a3a3" fontFamily="monospace">1 nm</text>
-        <rect x="335" y="280" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
-        <text x="342" y="291" fontSize="11" fill="#e5e5e5" textAnchor="middle">+</text>
-        <rect x="335" y="296" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
-        <text x="342" y="307" fontSize="11" fill="#e5e5e5" textAnchor="middle">−</text>
+        {/* Wind indicator */}
+        <g>
+          <circle cx="340" cy="18" r="10" fill="#1a1a1a" stroke="#404040" strokeWidth="1" opacity="0.8" />
+          <line x1="340" y1="18" x2={ax} y2={ay} stroke="#f97316" strokeWidth="1.5" />
+          <text x="340" y="34" fontSize="6" fill="#a3a3a3" textAnchor="middle" fontFamily="monospace">
+            {windArrow.speed}km/h
+          </text>
+        </g>
+
+        {/* FIRMS source badge */}
+        <text x="4" y="316" fontSize="6" fill="#52525b" fontFamily="monospace">
+          NASA FIRMS VIIRS NRT
+        </text>
+
+        {/* Scale / zoom controls */}
+        <text x="308" y="305" fontSize="8" fill="#a3a3a3" fontFamily="monospace">1 nm</text>
+        <rect x="323" y="280" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
+        <text x="330" y="291" fontSize="11" fill="#e5e5e5" textAnchor="middle">+</text>
+        <rect x="323" y="296" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
+        <text x="330" y="307" fontSize="11" fill="#e5e5e5" textAnchor="middle">−</text>
       </svg>
     </div>
   );
 }
 
 function PriorityZone({ x, y, w, h, priority, label }) {
-  const fill    = { critical: '#dc2626', high: '#facc15', normal: '#22c55e' }[priority];
-  const opacity = { critical: 0.1,       high: 0.08,      normal: 0.06     }[priority];
+  const fill     = { critical: '#dc2626', high: '#facc15', normal: '#22c55e' }[priority];
+  const opacity  = { critical: 0.1,       high: 0.08,      normal: 0.06     }[priority];
   const textColor = { critical: '#fca5a5', high: '#fde68a', normal: '#86efac' }[priority];
   return (
     <g>
@@ -327,19 +540,22 @@ function PriorityZone({ x, y, w, h, priority, label }) {
 // Resolution panel
 // ---------------------------------------------------------------------------
 
-function ResolutionPanel({ regions, events, mission }) {
+function ResolutionPanel({ regions, events, mission, drones, operator, simState, optFlash }) {
   return (
     <div
       className="border-t px-4 py-3 grid grid-cols-2 gap-4 flex-shrink-0"
       style={{ background: '#2a1a0a', borderColor: '#ea580c' }}
     >
-      <PriorityFlexBlock regions={regions} mission={mission} />
-      <StatusFeedBlock events={events} />
+      <PriorityFlexBlock regions={regions} mission={mission} drones={drones} simState={simState} optFlash={optFlash} />
+      <StatusFeedBlock events={events} simState={simState} />
     </div>
   );
 }
 
-function PriorityFlexBlock({ regions, mission }) {
+function PriorityFlexBlock({ regions, mission, drones, simState, optFlash }) {
+  const fleetSummary     = drones.find((d) => d.summary);
+  const individualDrones = drones.filter((d) => !d.summary);
+
   return (
     <div>
       <SectionHeader>Priority &amp; flexibility</SectionHeader>
@@ -350,11 +566,45 @@ function PriorityFlexBlock({ regions, mission }) {
         ))}
       </div>
 
-      <div className="text-[10px] text-zinc-400">
-        Tightest mission · {mission.tightest.drone} · ±{mission.tightest.timeFlex} min · ±{mission.tightest.spatialFlex}m
-      </div>
-      <div className="text-[10px] text-zinc-400">
-        Last rerun · priority shift · 2 reassignments
+      {mission.tightest && (
+        <div className="text-[10px] text-zinc-400">
+          Tightest mission · {mission.tightest.drone} · ±{mission.tightest.timeFlex} min · ±{mission.tightest.spatialFlex}m
+        </div>
+      )}
+
+      {simState && (
+        <div className="text-[10px] mt-1" style={{ color: optFlash ? '#c084fc' : '#a3a3a3' }}>
+          Fire sim tick {simState.tick} ·{' '}
+          <span style={{ color: '#f97316' }}>{simState.burning_count} burning</span>
+          {' · '}
+          <span className="text-zinc-500">{simState.burnt_count} burnt</span>
+          {' · '}wind {simState.wind_deg}° @ {simState.wind_speed} km/h
+          {optFlash && <span className="ml-2 font-medium" style={{ color: '#c084fc' }}>· optimizer triggered</span>}
+        </div>
+      )}
+
+      <div className="mt-2">
+        <div className="text-[9px] text-zinc-500 mb-1 uppercase tracking-wide">Fleet</div>
+        {fleetSummary ? (
+          <div className="text-[10px] text-zinc-300">
+            {fleetSummary.total} total · {fleetSummary.active} active · {fleetSummary.returning} returning · {fleetSummary.grounded} grounded
+          </div>
+        ) : individualDrones.length > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            {individualDrones.map((d) => (
+              <div key={d.id} className="flex items-center gap-2 text-[10px]">
+                <span
+                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: { active: '#22c55e', returning: '#facc15', grounded: '#52525b', idle: '#3b82f6' }[d.status] ?? '#52525b' }}
+                />
+                <span className="text-zinc-300 font-mono">{d.name ?? d.id}</span>
+                <span className="text-zinc-500">{d.status}</span>
+                {d.battery != null && <span className="text-zinc-600">{d.battery}%</span>}
+                {d.payload        && <span className="text-zinc-600">{d.payload}</span>}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -364,13 +614,18 @@ function StatusFeedBlock({ events }) {
   return (
     <div>
       <SectionHeader>Mission status</SectionHeader>
-      <div className="text-[10px] leading-relaxed">
-        {events.map((e) => (
-          <div key={e.id} className="flex gap-2 text-zinc-200">
-            <span className="text-zinc-500 font-mono">{e.ts}</span>
-            <span>{e.message}</span>
-          </div>
-        ))}
+      <div className="text-[10px] leading-relaxed max-h-24 overflow-y-auto">
+        {events.length === 0 ? (
+          <div className="text-zinc-600">No events for your access level</div>
+        ) : (
+          events.map((e) => (
+            <div key={e.id} className="flex gap-2"
+              style={{ color: e.type === 'optimizer_rerun' ? '#c084fc' : undefined }}>
+              <span className="text-zinc-500 font-mono flex-shrink-0">{e.ts}</span>
+              <span className={e.type === 'optimizer_rerun' ? '' : 'text-zinc-200'}>{e.message}</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

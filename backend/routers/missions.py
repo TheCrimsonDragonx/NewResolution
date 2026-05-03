@@ -1,13 +1,15 @@
-from fastapi import APIRouter, HTTPException
-from models import Mission
+from fastapi import APIRouter, HTTPException, Depends
+from models import Mission, Operator
+from deps import get_operator
+import filters
 import state
 
 router = APIRouter(prefix="/missions", tags=["missions"])
 
 
 @router.get("/")
-def list_missions() -> list[Mission]:
-    return list(state.missions.values())
+def list_missions(op: Operator = Depends(get_operator)) -> list[dict]:
+    return filters.filter_missions(list(state.missions.values()), op)
 
 
 @router.get("/{mission_id}")
