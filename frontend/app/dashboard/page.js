@@ -1,62 +1,26 @@
-// Place this file at: app/dashboard/page.js
-// Then run `npm run dev` and visit http://localhost:3000/dashboard
-//
-// What this is:
-// - PAMS-style backdrop (top status bar, left nav rail, operation setup,
-// SVG map with priority zones)
-// - Resolution-unique bottom panel: priority/flexibility + mission status
-// - All mock data lives at the top of the file under MOCK_*
-// - Phase 3: replace MOCK_* with Supabase queries (see // TODO markers)
-
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+const BACKEND = 'http://localhost:8000';
 
 // ---------------------------------------------------------------------------
-// Mock data — Phase 3 replaces these with Supabase queries
+// Nav config
 // ---------------------------------------------------------------------------
 
 const PAMS_NAV = [
-  { id: 'operation', label: 'Operation' },
-  { id: 'utm', label: 'UTM' },
-  { id: 'layers', label: 'Layers' },
-  { id: 'connections', label: 'Connections' },
+  { id: 'operation',     label: 'Operation' },
+  { id: 'utm',           label: 'UTM' },
+  { id: 'layers',        label: 'Layers' },
+  { id: 'connections',   label: 'Connections' },
   { id: 'notifications', label: 'Notifications' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'settings',      label: 'Settings' },
 ];
 
 const RESOLUTION_NAV = [
   { id: 'priority', label: 'Priority' },
-  { id: 'status', label: 'Status' },
+  { id: 'status',   label: 'Status' },
 ];
-
-// TODO: fetch from supabase table `regions(id, name, priority, weight)`
-const MOCK_REGIONS = [
-  { id: 'east', name: 'east', priority: 'critical', weight: 10 },
-  { id: 'mid', name: 'mid', priority: 'high', weight: 3 },
-  { id: 'west', name: 'west', priority: 'normal', weight: 1 },
-];
-
-// TODO: fetch from supabase table `events(ts, type, message)` ordered desc, limit 5
-const MOCK_EVENTS = [
-  { ts: '11:09', type: 'drone_refueling', message: 'UAS-07 refueling · backup assigned' },
-  { ts: '11:08', type: 'mission_completed', message: 'H-12 mission completed' },
-  { ts: '11:07', type: 'priority_changed', message: 'IC priority change · east → critical' },
-  { ts: '11:05', type: 'drone_disconnected', message: 'UAS-09 disconnected · last seen tracked' },
-];
-
-// TODO: fetch from supabase table `operations` joined with `missions`
-const MOCK_MISSION = {
-  id: 'UR31',
-  status: 'active',
-  startTime: '11:10',
-  duration: 30,
-  location: { lat: 36.5124, lng: -121.5365 },
-  volume: { width: 0.67, height: 0.87, minAlt: 0, maxAlt: 1145 },
-  tightest: { drone: 'UAS-04', timeFlex: 5, spatialFlex: 100 },
-};
-
-const MOCK_MESH = { radio: 'warning', pingStation: 'ok', network: 'ok' };
 
 // ---------------------------------------------------------------------------
 // Page
@@ -65,15 +29,73 @@ const MOCK_MESH = { radio: 'warning', pingStation: 'ok', network: 'ok' };
 export default function DashboardPage() {
   const [activeNav, setActiveNav] = useState('operation');
 
+  const [regions,  setRegions]  = useState([]);
+  const [events,   setEvents]   = useState([]);
+  const [mission,  setMission]  = useState(null);
+  const [mesh,     setMesh]     = useState(null);
+  const [backendOk, setBackendOk] = useState(null); // null=loading, true=ok, false=error
+
+  async function fetchAll() {
+    try {
+      const [regRes, evtRes, msnRes, meshRes] = await Promise.all([
+        fetch(`${BACKEND}/regions/`),
+        fetch(`${BACKEND}/events/?limit=5`),
+        fetch(`${BACKEND}/missions/`),
+        fetch(`${BACKEND}/mesh`),
+      ]);
+
+      const [regs, evts, missions, meshData] = await Promise.all([
+        regRes.json(),
+        evtRes.json(),
+        msnRes.json(),
+        meshRes.json(),
+      ]);
+
+      setRegions(regs);
+      setEvents(evts);
+      setMission(missions[0] ?? null);   // use first active mission
+      setMesh(meshData);
+      setBackendOk(true);
+    } catch {
+      setBackendOk(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 5000); // poll every 5 s
+    return () => clearInterval(interval);
+  }, []);
+
+  if (backendOk === false) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center text-sm text-red-400" style={{ background: '#1a1a1a' }}>
+        Cannot reach backend at {BACKEND} — run{' '}
+        <code className="mx-1 px-1.5 py-0.5 rounded font-mono" style={{ background: '#2a1a1a' }}>
+          uvicorn main:app --port 8000
+        </code>
+        inside <code className="mx-1 px-1.5 py-0.5 rounded font-mono" style={{ background: '#2a1a1a' }}>backend/</code>
+      </div>
+    );
+  }
+
+  if (!mission || !mesh) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center text-xs text-zinc-500" style={{ background: '#1a1a1a' }}>
+        Connecting to backend…
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col font-sans overflow-hidden text-zinc-100" style={{ background: '#1a1a1a' }}>
-      <StatusBar mission={MOCK_MISSION} mesh={MOCK_MESH} />
+      <StatusBar mission={mission} mesh={mesh} />
       <div className="flex-1 flex min-h-0">
         <NavRail active={activeNav} onChange={setActiveNav} />
-        <OperationSetup mission={MOCK_MISSION} />
-        <MapView regions={MOCK_REGIONS} />
+        <OperationSetup mission={mission} />
+        <MapView regions={regions} />
       </div>
-      <ResolutionPanel regions={MOCK_REGIONS} events={MOCK_EVENTS} mission={MOCK_MISSION} />
+      <ResolutionPanel regions={regions} events={events} mission={mission} />
     </div>
   );
 }
@@ -88,12 +110,14 @@ function StatusBar({ mission, mesh }) {
       <div className="flex items-center gap-2">
         <span className="text-zinc-400">Operation</span>
         <span className="font-medium">{mission.id} {mission.status}</span>
-        <span className="text-zinc-500 font-mono">11:09:49</span>
+        <span className="text-zinc-500 font-mono">
+          {new Date().toLocaleTimeString('en-US', { hour12: false })}
+        </span>
       </div>
       <div className="flex items-center gap-4">
-        <MeshDot label="radio" status={mesh.radio} />
+        <MeshDot label="radio"       status={mesh.radio} />
         <MeshDot label="pingStation" status={mesh.pingStation} />
-        <MeshDot label="network" status={mesh.network} />
+        <MeshDot label="network"     status={mesh.network} />
       </div>
     </div>
   );
@@ -101,10 +125,10 @@ function StatusBar({ mission, mesh }) {
 
 function MeshDot({ label, status }) {
   const color = {
-    ok: 'bg-green-500',
-    warning: 'bg-yellow-400',
+    ok:       'bg-green-500',
+    warning:  'bg-yellow-400',
     critical: 'bg-red-500',
-    offline: 'bg-zinc-600',
+    offline:  'bg-zinc-600',
   }[status] ?? 'bg-zinc-600';
   return (
     <span className="flex items-center gap-1.5">
@@ -156,7 +180,7 @@ function NavItem({ item, active, onClick, accent }) {
 }
 
 // ---------------------------------------------------------------------------
-// Operation Setup panel — hardcoded to match NASA's UR31 demo values
+// Operation Setup panel
 // ---------------------------------------------------------------------------
 
 function OperationSetup({ mission }) {
@@ -241,7 +265,7 @@ function Toggle({ checked }) {
 }
 
 // ---------------------------------------------------------------------------
-// Map view — SVG placeholder. Phase 2 swaps in MapLibre + Esri satellite tiles.
+// Map view — SVG placeholder (Phase 2: swap in MapLibre + real GeoJSON)
 // Salinas test site center: 36.5124, -121.5365
 // ---------------------------------------------------------------------------
 
@@ -251,17 +275,14 @@ function MapView({ regions }) {
       <svg viewBox="0 0 360 320" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 w-full h-full">
         <rect width="360" height="320" fill="#3a4a2a" />
 
-        {/* Topographic contour suggestion */}
-        <path d="M 0 80 Q 90 60 180 100 T 360 90" stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
+        <path d="M 0 80 Q 90 60 180 100 T 360 90"   stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
         <path d="M 0 140 Q 100 130 200 150 T 360 160" stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
         <path d="M 0 210 Q 80 200 180 220 T 360 230" stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
 
-        {/* Priority zones — these will be GeoJSON polygons in Phase 2 */}
-        <PriorityZone x={200} y={40} w={160} h={120} priority="critical" label="east · critical" />
-        <PriorityZone x={60} y={100} w={140} h={120} priority="high" label="mid · high" />
-        <PriorityZone x={0} y={220} w={200} h={100} priority="normal" label="west · normal" />
+        <PriorityZone x={200} y={40}  w={160} h={120} priority="critical" label="east · critical" />
+        <PriorityZone x={60}  y={100} w={140} h={120} priority="high"     label="mid · high" />
+        <PriorityZone x={0}   y={220} w={200} h={100} priority="normal"   label="west · normal" />
 
-        {/* Operational volume + corner handles (matches PAMS UR31 polygon) */}
         <rect x="80" y="60" width="200" height="200" fill="none" stroke="#e5e5e5" strokeWidth="1" strokeDasharray="3 3" />
         {[
           [76, 56], [176, 56], [276, 56],
@@ -271,7 +292,6 @@ function MapView({ regions }) {
           <rect key={i} x={x} y={y} width="8" height="8" fill="white" />
         ))}
 
-        {/* Aircraft markers — fires (red circles) and drones (blue triangles) */}
         <circle cx="240" cy="100" r="6" fill="#dc2626" />
         <circle cx="280" cy="130" r="6" fill="#dc2626" />
         <circle cx="140" cy="180" r="6" fill="#dc2626" />
@@ -279,7 +299,6 @@ function MapView({ regions }) {
         <polygon points="200,120 205,130 195,130" fill="#3b82f6" />
         <polygon points="260,150 265,160 255,160" fill="#3b82f6" />
 
-        {/* Scale + zoom controls (decorative) */}
         <text x="320" y="305" fontSize="8" fill="#a3a3a3" fontFamily="monospace">1 nm</text>
         <rect x="335" y="280" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
         <text x="342" y="291" fontSize="11" fill="#e5e5e5" textAnchor="middle">+</text>
@@ -291,8 +310,8 @@ function MapView({ regions }) {
 }
 
 function PriorityZone({ x, y, w, h, priority, label }) {
-  const fill = { critical: '#dc2626', high: '#facc15', normal: '#22c55e' }[priority];
-  const opacity = { critical: 0.1, high: 0.08, normal: 0.06 }[priority];
+  const fill    = { critical: '#dc2626', high: '#facc15', normal: '#22c55e' }[priority];
+  const opacity = { critical: 0.1,       high: 0.08,      normal: 0.06     }[priority];
   const textColor = { critical: '#fca5a5', high: '#fde68a', normal: '#86efac' }[priority];
   return (
     <g>
@@ -305,7 +324,7 @@ function PriorityZone({ x, y, w, h, priority, label }) {
 }
 
 // ---------------------------------------------------------------------------
-// Resolution panel — priority+flex on the left, mission status on the right
+// Resolution panel
 // ---------------------------------------------------------------------------
 
 function ResolutionPanel({ regions, events, mission }) {
@@ -346,8 +365,8 @@ function StatusFeedBlock({ events }) {
     <div>
       <SectionHeader>Mission status</SectionHeader>
       <div className="text-[10px] leading-relaxed">
-        {events.map((e, i) => (
-          <div key={i} className="flex gap-2 text-zinc-200">
+        {events.map((e) => (
+          <div key={e.id} className="flex gap-2 text-zinc-200">
             <span className="text-zinc-500 font-mono">{e.ts}</span>
             <span>{e.message}</span>
           </div>
@@ -369,8 +388,8 @@ function SectionHeader({ children }) {
 function PriorityChip({ region }) {
   const styles = {
     critical: { background: '#4a1208', color: '#fca5a5' },
-    high: { background: '#3a2a08', color: '#fde68a' },
-    normal: { background: '#1a2a18', color: '#86efac' },
+    high:     { background: '#3a2a08', color: '#fde68a' },
+    normal:   { background: '#1a2a18', color: '#86efac' },
   }[region.priority];
   return (
     <span className="px-1.5 py-0.5 rounded text-[10px]" style={styles}>
