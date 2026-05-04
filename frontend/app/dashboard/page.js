@@ -27,6 +27,7 @@ const ROLE_BADGE_COLOR = {
   commander: '#ea580c',
   pilot:     '#2563eb',
   atgs:      '#0f766e',
+  dispatch:  '#7c3aed',
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ export default function DashboardPage() {
   const [regions,       setRegions]       = useState([]);
   const [events,        setEvents]        = useState([]);
   const [mission,       setMission]       = useState(null);
+  const [allMissions,   setAllMissions]   = useState([]);
   const [mesh,          setMesh]          = useState(null);
   const [drones,        setDrones]        = useState([]);
   const [fireZones,     setFireZones]     = useState([]);
@@ -100,6 +102,7 @@ export default function DashboardPage() {
       ]);
       setRegions(regs);
       setEvents(evts);
+      setAllMissions(missions);
       setMission(missions[0] ?? null);
       setMesh(meshData);
       setFireZones(fzData.filter(fz => fz.active !== false));
@@ -158,7 +161,7 @@ export default function DashboardPage() {
     return () => clearInterval(id);
   }, [operator]);
 
-  // Optimizer poll (3s): assignments + QUBO result — all roles except observer (now atgs)
+  // Optimizer poll (3s): assignments + QUBO result — all four roles
   useEffect(() => {
     if (!operator) return;
     async function fetchOpt() {
@@ -222,6 +225,7 @@ export default function DashboardPage() {
       </div>
       <ResolutionPanel
         regions={regions} events={events} mission={mission}
+        allMissions={allMissions}
         drones={drones} operator={operator}
         simState={simState} optFlash={optFlash}
         lastOptResult={lastOptResult}
@@ -510,6 +514,20 @@ function MapView({ drones, fireZones, simState, lastOptResult }) {
           );
         })}
 
+        {/* Manned aircraft layer — Air Tanker 77 on western approach */}
+        <g>
+          <rect x={0} y={126} width={92} height={44}
+            fill="none" stroke="#fbbf24" strokeWidth={0.8} strokeDasharray="5 4" opacity={0.5} />
+          <text x={3} y={136} fontSize={5.5} fill="#fbbf24" fontFamily="monospace" opacity={0.65}>
+            MANNED OPS CORRIDOR
+          </text>
+          {/* Wide diamond — fixed-wing silhouette, distinct from UAS triangles */}
+          <polygon points="48,144 58,148 48,152 38,148" fill="#fbbf24" opacity={0.9} />
+          <text x={48} y={161} fontSize={5} fill="#fbbf24" textAnchor="middle" fontFamily="monospace">
+            AIR TANKER 77
+          </text>
+        </g>
+
         {/* Assignment lines: drone → target fire zone */}
         {(lastOptResult?.assignments ?? []).map(a => {
           const d  = droneMap[a.droneId];
@@ -570,6 +588,8 @@ function MapView({ drones, fireZones, simState, lastOptResult }) {
           <text x="56" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">idle</text>
           <circle cx="74" cy="308" r="3" fill="#facc15" />
           <text x="80" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">returning</text>
+          <polygon points="120,305 126,308 120,311 114,308" fill="#fbbf24" />
+          <text x="129" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">manned</text>
         </g>
 
         {/* FIRMS badge */}
@@ -602,18 +622,18 @@ function PriorityZone({ x, y, w, h, priority, label }) {
 // Resolution panel — 3-column: priority | optimizer | events
 // ---------------------------------------------------------------------------
 
-function ResolutionPanel({ regions, events, mission, drones, operator, simState, optFlash, lastOptResult }) {
+function ResolutionPanel({ regions, events, mission, allMissions, drones, operator, simState, optFlash, lastOptResult }) {
   return (
     <div className="border-t px-4 py-3 grid grid-cols-3 gap-4 flex-shrink-0"
       style={{ background: '#2a1a0a', borderColor: '#ea580c' }}>
-      <PriorityFlexBlock regions={regions} mission={mission} simState={simState} optFlash={optFlash} />
+      <PriorityFlexBlock regions={regions} mission={mission} allMissions={allMissions} simState={simState} optFlash={optFlash} />
       <OptimizerBlock lastOptResult={lastOptResult} drones={drones} operator={operator} />
       <StatusFeedBlock events={events} drones={drones} />
     </div>
   );
 }
 
-function PriorityFlexBlock({ regions, mission, simState, optFlash }) {
+function PriorityFlexBlock({ regions, mission, allMissions, simState, optFlash }) {
   return (
     <div>
       <SectionHeader>Priority &amp; flexibility</SectionHeader>
@@ -625,6 +645,28 @@ function PriorityFlexBlock({ regions, mission, simState, optFlash }) {
           Tightest · {mission.tightest.drone} · ±{mission.tightest.timeFlex}min · ±{mission.tightest.spatialFlex}m
         </div>
       )}
+
+      {/* Multi-incident list */}
+      {allMissions.length > 1 && (
+        <div className="mt-1.5">
+          <div className="text-[9px] font-mono mb-0.5" style={{ color: '#52525b' }}>
+            INCIDENTS ({allMissions.length})
+          </div>
+          {allMissions.map(m => (
+            <div key={m.id} className="flex items-center gap-2 text-[9px] font-mono mb-0.5">
+              <span style={{ color: m.status === 'active' ? '#4ade80' : '#a3a3a3' }}>■</span>
+              <span className="text-zinc-300">{m.id}</span>
+              <span className="text-zinc-500">{m.status}</span>
+              {m.location && (
+                <span className="text-zinc-600 text-[8px]">
+                  {m.location.lat.toFixed(3)}, {m.location.lng.toFixed(3)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {simState && (
         <div className="text-[10px] mt-1.5" style={{ color: optFlash ? '#c084fc' : '#a3a3a3' }}>
           T{simState.tick} ·{' '}
@@ -703,8 +745,8 @@ function OptimizerBlock({ lastOptResult, drones, operator }) {
       </div>
 
       {/* Capability note — always visible */}
-      <div className="text-[9px] mb-2" style={{ color: '#52525b' }}>
-        System maintains local optimization capability under degraded or absent connectivity
+      <div className="text-[9px] mb-2 leading-relaxed" style={{ color: '#52525b' }}>
+        System maintains local optimization capability under degraded or absent connectivity · GPS-denied fallback: last-known position + velocity extrapolation
       </div>
 
       {/* Benchmark results table */}
@@ -840,9 +882,9 @@ function AircraftSeparationPanel({ drones, lastOptResult }) {
   const minSep = top4.length > 0 ? top4[0].horizM : null;
 
   const PAYLOAD_LABELS = {
-    thermal_camera:    'thermal',
-    suppression_asset: 'suppression',
-    sensor_array:      'sensor',
+    thermal_camera:            'thermal',
+    retardant_coverage_tracker: 'retardant',
+    sensor_array:              'sensor',
   };
 
   return (

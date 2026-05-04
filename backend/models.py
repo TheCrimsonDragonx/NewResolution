@@ -14,6 +14,7 @@ class OperatorRole(str, Enum):
     commander = "commander"
     pilot     = "pilot"
     atgs      = "atgs"       # Air Tactical Group Supervisor
+    dispatch  = "dispatch"   # Aircraft Dispatch
 
 
 class DroneStatus(str, Enum):
@@ -89,7 +90,7 @@ class Drone(BaseModel):
     status: DroneStatus
     position: DronePosition
     battery: int      # 0–100 %
-    payload: str      # e.g. "thermal_camera", "suppression_asset", "sensor_array"
+    payload: str      # e.g. "thermal_camera", "retardant_coverage_tracker", "sensor_array"
 
 
 class FireZone(BaseModel):

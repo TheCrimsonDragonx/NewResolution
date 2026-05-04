@@ -16,7 +16,7 @@ def trigger_optimizer(
     request: OptimizerRequest = OptimizerRequest(),
     op: Operator = Depends(get_operator),
 ) -> dict:
-    if op.role == OperatorRole.atgs:
+    if op.role in (OperatorRole.atgs, OperatorRole.dispatch):
         raise HTTPException(status_code=403, detail="Optimizer trigger requires Commander or Pilot role")
     global _last_result
     _last_result = run_optimizer(request.drones, request.fireZones)
@@ -96,7 +96,13 @@ def run_benchmark(op: Operator = Depends(get_operator)) -> dict:
         except Exception as e:
             rows.append({"n_drones": n, "error": str(e)})
 
-    return {"rows": rows, "area_m": 6000, "num_alternatives": 10, "solver": "simulated_annealing"}
+    return {
+        "rows": rows,
+        "area_m": 6000,
+        "num_alternatives": 10,
+        "solver": "simulated_annealing",
+        "gps_degraded_note": "In GPS-denied mode, positions degrade to last-known + velocity extrapolation; deconfliction volumes expand by 1.5× to account for position uncertainty",
+    }
 
 
 @router.get("/last-result")

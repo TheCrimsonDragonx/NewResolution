@@ -4,7 +4,7 @@ _PUBLIC_EVENT_TYPES = {"mission_completed", "priority_changed"}
 
 
 def filter_drones(drones: list[Drone], op: Operator) -> list[dict]:
-    if op.role in (OperatorRole.commander, OperatorRole.atgs):
+    if op.role in (OperatorRole.commander, OperatorRole.atgs, OperatorRole.dispatch):
         return [d.model_dump() for d in drones]
     if op.role == OperatorRole.pilot:
         result = []
@@ -18,7 +18,7 @@ def filter_drones(drones: list[Drone], op: Operator) -> list[dict]:
 
 
 def filter_missions(missions: list[Mission], op: Operator) -> list[dict]:
-    if op.role in (OperatorRole.commander, OperatorRole.atgs):
+    if op.role in (OperatorRole.commander, OperatorRole.atgs, OperatorRole.dispatch):
         return [m.model_dump() for m in missions]
     if op.role == OperatorRole.pilot:
         result = []
@@ -32,7 +32,7 @@ def filter_missions(missions: list[Mission], op: Operator) -> list[dict]:
 
 
 def filter_fires(fires: list[FireZone], op: Operator) -> list[dict]:
-    if op.role in (OperatorRole.commander, OperatorRole.atgs):
+    if op.role in (OperatorRole.commander, OperatorRole.atgs, OperatorRole.dispatch):
         return [fz.model_dump() for fz in fires]
     if op.role == OperatorRole.pilot:
         result = []
@@ -48,7 +48,7 @@ def filter_fires(fires: list[FireZone], op: Operator) -> list[dict]:
 
 
 def filter_events(events: list[Event], op: Operator) -> list[dict]:
-    if op.role in (OperatorRole.commander, OperatorRole.atgs):
+    if op.role in (OperatorRole.commander, OperatorRole.atgs, OperatorRole.dispatch):
         return [e.model_dump() for e in events]
     if op.role == OperatorRole.pilot:
         drone_id  = (op.assigned_drone_id  or "").lower()

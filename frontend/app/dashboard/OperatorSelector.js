@@ -8,12 +8,14 @@ const ROLE_STYLES = {
   commander: { badge: '#ea580c', bg: '#2a1a0a', border: '#ea580c' },
   pilot:     { badge: '#2563eb', bg: '#0a1a2a', border: '#2563eb' },
   atgs:      { badge: '#0f766e', bg: '#0d1f1e', border: '#0f766e' },
+  dispatch:  { badge: '#7c3aed', bg: '#1a0d2e', border: '#7c3aed' },
 };
 
 const ROLE_DESC = {
   commander: 'Full access — all drones, fire zones, events, and optimizer',
   pilot:     'Your assigned drone and region — partial fleet visibility',
   atgs:      'Airspace deconfliction — all aircraft separation and assignment status',
+  dispatch:  'Flight authorization — all-incident scheduling and deconfliction status',
 };
 
 export default function OperatorSelector({ onSelect }) {

@@ -66,6 +66,18 @@ def seed() -> None:
     )
     missions[m.id] = m
 
+    # Second concurrent incident — standby, northern sector
+    b = Mission(
+        id="BRAVO-07",
+        status="standby",
+        startTime="11:45",
+        duration=45,
+        location=Location(lat=36.5210, lng=-121.5195),
+        volume=Volume(width=0.42, height=0.55, minAlt=0, maxAlt=890),
+        tightest=TightestConstraint(drone="UAS-11", timeFlex=8, spatialFlex=150),
+    )
+    missions[b.id] = b
+
     # Drones — expanded UAS fleet at Salinas test site (~20 aircraft)
     for d in [
         # Existing core fleet
@@ -74,7 +86,7 @@ def seed() -> None:
               battery=89, payload="thermal_camera"),
         Drone(id="UAS-07", name="UAS-07", status=DroneStatus.grounded,
               position=DronePosition(lat=36.5100, lng=-121.5380, alt=0),
-              battery=12, payload="suppression_asset"),
+              battery=12, payload="retardant_coverage_tracker"),
         Drone(id="UAS-09", name="UAS-09", status=DroneStatus.grounded,
               position=DronePosition(lat=36.5160, lng=-121.5400, alt=0),
               battery=0,  payload="sensor_array"),
@@ -83,7 +95,7 @@ def seed() -> None:
               battery=95, payload="thermal_camera"),
         Drone(id="UAS-12", name="UAS-12", status=DroneStatus.returning,
               position=DronePosition(lat=36.5180, lng=-121.5320, alt=800),
-              battery=35, payload="suppression_asset"),
+              battery=35, payload="retardant_coverage_tracker"),
         # Northern row
         Drone(id="UAS-01", name="UAS-01", status=DroneStatus.idle,
               position=DronePosition(lat=36.5270, lng=-121.5430, alt=0),
@@ -103,7 +115,7 @@ def seed() -> None:
               battery=68, payload="thermal_camera"),
         Drone(id="UAS-08", name="UAS-08", status=DroneStatus.idle,
               position=DronePosition(lat=36.5150, lng=-121.5300, alt=0),
-              battery=93, payload="suppression_asset"),
+              battery=93, payload="retardant_coverage_tracker"),
         Drone(id="UAS-10", name="UAS-10", status=DroneStatus.returning,
               position=DronePosition(lat=36.5130, lng=-121.5220, alt=600),
               battery=28, payload="thermal_camera"),
@@ -116,7 +128,7 @@ def seed() -> None:
               battery=54, payload="thermal_camera"),
         Drone(id="UAS-15", name="UAS-15", status=DroneStatus.idle,
               position=DronePosition(lat=36.5030, lng=-121.5250, alt=0),
-              battery=79, payload="suppression_asset"),
+              battery=79, payload="retardant_coverage_tracker"),
         Drone(id="UAS-16", name="UAS-16", status=DroneStatus.returning,
               position=DronePosition(lat=36.5020, lng=-121.5180, alt=500),
               battery=31, payload="sensor_array"),
@@ -132,7 +144,7 @@ def seed() -> None:
               battery=47, payload="thermal_camera"),
         Drone(id="UAS-20", name="UAS-20", status=DroneStatus.returning,
               position=DronePosition(lat=36.5250, lng=-121.5400, alt=700),
-              battery=22, payload="suppression_asset"),
+              battery=22, payload="retardant_coverage_tracker"),
     ]:
         drones[d.id] = d
 
@@ -163,6 +175,7 @@ def seed() -> None:
         Operator(id="op-plt-04", name="Pilot Rivera",    role=OperatorRole.pilot,
                  assigned_drone_id="UAS-04", assigned_region_id="east"),
         Operator(id="op-atgs-01", name="ATGS Chen",       role=OperatorRole.atgs),
+        Operator(id="op-dsp-01", name="Dispatch Nguyen", role=OperatorRole.dispatch),
     ]:
         operators[op.id] = op
 
