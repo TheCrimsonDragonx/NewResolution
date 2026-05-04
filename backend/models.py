@@ -13,7 +13,7 @@ class Priority(str, Enum):
 class OperatorRole(str, Enum):
     commander = "commander"
     pilot     = "pilot"
-    observer  = "observer"
+    atgs      = "atgs"       # Air Tactical Group Supervisor
 
 
 class DroneStatus(str, Enum):
@@ -89,7 +89,7 @@ class Drone(BaseModel):
     status: DroneStatus
     position: DronePosition
     battery: int      # 0–100 %
-    payload: str      # e.g. "thermal_camera", "water_drop", "sensor_array"
+    payload: str      # e.g. "thermal_camera", "suppression_asset", "sensor_array"
 
 
 class FireZone(BaseModel):
@@ -141,7 +141,7 @@ class SimState(BaseModel):
 
 class OptimizerRequest(BaseModel):
     drones: Optional[list[str]] = None      # drone IDs to consider; None = all available
-    fireZones: Optional[list[str]] = None   # fire zone IDs to target; None = all active
+    fireZones: Optional[list[str]] = None   # restricted airspace volume IDs to target; None = all active
 
 
 class AssignmentResult(BaseModel):

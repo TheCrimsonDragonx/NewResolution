@@ -189,18 +189,26 @@ def run_optimizer(
         f"cost {r['qubo_cost']:.1f} vs greedy {r['greedy_cost']:.1f}"
     )
 
-    return OptimizerResult(
+    opt_result = OptimizerResult(
         status="qubo",
         message=message,
         assignments=assignments,
         totalCoverage=coverage,
         runId=str(uuid.uuid4()),
     )
+    _persist_assignments(opt_result)
+    return opt_result
 
 
 # ---------------------------------------------------------------------------
 # Greedy fallback — used when algo.py or dwave-samplers is unavailable
 # ---------------------------------------------------------------------------
+
+def _persist_assignments(result: OptimizerResult) -> None:
+    """Write the latest assignments into state so the movement loop can use them."""
+    state.current_assignments = {a.droneId: a.fireZoneId for a in result.assignments}
+    state.last_opt_message = result.message
+
 
 def _greedy_fallback(
     pre: list[tuple],
@@ -223,10 +231,12 @@ def _greedy_fallback(
         ))
     coverage = round(min(1.0, len(assignments) / max(1, len(targets))), 2)
     msg = "Greedy fallback" + (f" — {note}" if note else "")
-    return OptimizerResult(
+    opt_result = OptimizerResult(
         status="greedy",
         message=msg,
         assignments=assignments,
         totalCoverage=coverage,
         runId=str(uuid.uuid4()),
     )
+    _persist_assignments(opt_result)
+    return opt_result

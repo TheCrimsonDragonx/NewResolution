@@ -7,13 +7,13 @@ const BACKEND = 'http://localhost:8000';
 const ROLE_STYLES = {
   commander: { badge: '#ea580c', bg: '#2a1a0a', border: '#ea580c' },
   pilot:     { badge: '#2563eb', bg: '#0a1a2a', border: '#2563eb' },
-  observer:  { badge: '#52525b', bg: '#1a1a1a', border: '#52525b' },
+  atgs:      { badge: '#0f766e', bg: '#0d1f1e', border: '#0f766e' },
 };
 
 const ROLE_DESC = {
   commander: 'Full access — all drones, fire zones, events, and optimizer',
   pilot:     'Your assigned drone and region — partial fleet visibility',
-  observer:  'High-level overview — aggregate status and public events',
+  atgs:      'Airspace deconfliction — all aircraft separation and assignment status',
 };
 
 export default function OperatorSelector({ onSelect }) {
@@ -50,7 +50,7 @@ export default function OperatorSelector({ onSelect }) {
       ) : (
         <div className="flex gap-4">
           {operators.map((op) => {
-            const s = ROLE_STYLES[op.role] ?? ROLE_STYLES.observer;
+            const s = ROLE_STYLES[op.role] ?? ROLE_STYLES.atgs;
             return (
               <button
                 key={op.id}
