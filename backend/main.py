@@ -180,7 +180,8 @@ async def _fire_simulation_loop() -> None:
         _update_mesh(g.tick)
 
         if g.tick % _OPTIMIZER_INTERVAL == 0:
-            result = run_optimizer(None, None)
+            # Run QUBO in a thread so the event loop stays free for poll requests
+            result = await asyncio.to_thread(run_optimizer, None, None)
             ts = datetime.now().strftime("%H:%M")
             n = len(result.assignments)
             burning = g.burning_count()

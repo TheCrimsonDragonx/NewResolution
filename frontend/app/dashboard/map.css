@@ -1,0 +1,45 @@
+/* Dark-theme overrides for Leaflet tooltips */
+.leaflet-tooltip.res-tip {
+  background: rgba(0, 0, 0, 0.84);
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  color: #e4e4e7;
+  font-family: ui-monospace, 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 4px 7px;
+  box-shadow: none;
+}
+
+.leaflet-tooltip.res-tip::before {
+  border-top-color: #3a3a3a;
+}
+
+/* Permanent fire-zone ID labels — minimal, no background */
+.leaflet-tooltip.res-label {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #f97316;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0;
+  text-shadow: 0 0 4px rgba(0,0,0,0.9);
+}
+
+.leaflet-tooltip.res-label::before {
+  display: none;
+}
+
+/* Darken and desaturate the ESRI satellite tiles slightly
+   so overlays (fire, drones) stay readable against the bright imagery */
+.esri-tiles {
+  filter: brightness(0.80) saturate(0.80);
+}
+
+/* Hide Leaflet's default attribution box */
+.leaflet-control-attribution {
+  display: none;
+}

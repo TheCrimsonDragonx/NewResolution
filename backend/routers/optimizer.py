@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import numpy as np
@@ -12,14 +13,15 @@ _last_result: OptimizerResult | None = None
 
 
 @router.post("/run")
-def trigger_optimizer(
+async def trigger_optimizer(
     request: OptimizerRequest = OptimizerRequest(),
     op: Operator = Depends(get_operator),
 ) -> dict:
     if op.role in (OperatorRole.atgs, OperatorRole.dispatch):
         raise HTTPException(status_code=403, detail="Optimizer trigger requires Commander or Pilot role")
     global _last_result
-    _last_result = run_optimizer(request.drones, request.fireZones)
+    # Run QUBO in a thread — keeps the event loop free for poll requests during the ~4s solve
+    _last_result = await asyncio.to_thread(run_optimizer, request.drones, request.fireZones)
     if op.role == OperatorRole.pilot:
         filtered = [a for a in _last_result.assignments if a.droneId == op.assigned_drone_id]
         return {**_last_result.model_dump(), "assignments": [a.model_dump() for a in filtered]}

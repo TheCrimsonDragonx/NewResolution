@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import OperatorSelector from './OperatorSelector';
+
+const MapView = dynamic(() => import('./MapView'), { ssr: false });
 
 const BACKEND = 'http://localhost:8000';
 
@@ -31,28 +34,6 @@ const ROLE_BADGE_COLOR = {
 };
 
 // ---------------------------------------------------------------------------
-// Map coordinate helpers
-// SVG viewBox: 0 0 360 320
-// Salinas test-site bbox: lat 36.500–36.530, lng -121.545–-121.515
-// ---------------------------------------------------------------------------
-const MAP_LAT_MAX = 36.530;
-const MAP_LAT_MIN = 36.500;
-const MAP_LNG_MIN = -121.545;
-const MAP_LNG_MAX = -121.515;
-const SVG_W = 360;
-const SVG_H = 320;
-
-// Meters per SVG pixel (flat-earth at grid center)
-const M_PER_PX_X = ((MAP_LNG_MAX - MAP_LNG_MIN) * 111320 * Math.cos(Math.PI * (MAP_LAT_MAX + MAP_LAT_MIN) / 2 / 180)) / SVG_W;
-const M_PER_PX_Y = ((MAP_LAT_MAX - MAP_LAT_MIN) * 111320) / SVG_H;
-
-function latLngToSvg(lat, lng) {
-  const x = ((lng - MAP_LNG_MIN) / (MAP_LNG_MAX - MAP_LNG_MIN)) * SVG_W;
-  const y = ((MAP_LAT_MAX - lat) / (MAP_LAT_MAX - MAP_LAT_MIN)) * SVG_H;
-  return [x, y];
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -74,6 +55,7 @@ export default function DashboardPage() {
 
   const prevBurningRef        = useRef(0);
   const lastReplanEventIdRef  = useRef(null);   // prevents re-triggering on same event
+  const lastOptTriggerRef     = useRef(0);      // timestamp of last frontend-triggered /run
 
   useEffect(() => {
     const stored = localStorage.getItem('wildfire_operator');
@@ -140,8 +122,10 @@ export default function DashboardPage() {
           const data = await simRes.json();
           setSimState(data);
           const prev = prevBurningRef.current;
-          if (data.burning_count - prev >= 15) {
+          const now = Date.now();
+          if (data.burning_count - prev >= 15 && now - lastOptTriggerRef.current > 30_000) {
             prevBurningRef.current = data.burning_count;
+            lastOptTriggerRef.current = now;
             fetch(`${BACKEND}/optimizer/run`, {
               method: 'POST',
               headers: { 'X-Operator-ID': operator.id, 'Content-Type': 'application/json' },
@@ -427,196 +411,7 @@ function Toggle({ checked }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Map view
-// Salinas bbox: lat 36.500–36.530, lng -121.545–-121.515
-// SVG viewBox: 0 0 360 320
-// ---------------------------------------------------------------------------
-
-function MapView({ drones, fireZones, simState, lastOptResult }) {
-  const CELL_W = SVG_W / 30;
-  const CELL_H = SVG_H / 30;
-
-  // Index drone SVG positions (non-grounded only)
-  const droneMap = {};
-  const dronePositions = [];
-  for (const d of drones) {
-    if (!d.position || d.status === 'grounded') continue;
-    const [x, y] = latLngToSvg(d.position.lat, d.position.lng);
-    const entry = { ...d, svgX: x, svgY: y };
-    droneMap[d.id] = entry;
-    dronePositions.push(entry);
-  }
-
-  // Build set of assigned drone IDs for coloring
-  const assignedDrones = new Set((lastOptResult?.assignments ?? []).map(a => a.droneId));
-
-  // Index fire zone SVG positions
-  const fzMap = {};
-  for (const fz of fireZones) {
-    const [x, y] = latLngToSvg(fz.location.lat, fz.location.lng);
-    fzMap[fz.id] = { ...fz, svgX: x, svgY: y };
-  }
-
-  // Wind arrow
-  const windDeg   = simState?.wind_deg   ?? 225;
-  const windSpeed = simState?.wind_speed ?? 20;
-  const windRad   = (windDeg * Math.PI) / 180;
-  const ax = 340 + 10 * Math.sin(windRad);
-  const ay = 18  - 10 * Math.cos(windRad);
-
-  return (
-    <div className="flex-1 relative overflow-hidden" style={{ background: '#243a1a' }}>
-      <svg viewBox="0 0 360 320" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 w-full h-full">
-        <rect width="360" height="320" fill="#3a4a2a" />
-
-        {/* Terrain contour lines */}
-        <path d="M 0 80 Q 90 60 180 100 T 360 90"    stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
-        <path d="M 0 140 Q 100 130 200 150 T 360 160" stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
-        <path d="M 0 210 Q 80 200 180 220 T 360 230"  stroke="#5a6a3a" strokeWidth="1" fill="none" opacity="0.5" />
-
-        {/* Priority region overlays */}
-        <PriorityZone x={200} y={40}  w={160} h={120} priority="critical" label="east · critical" />
-        <PriorityZone x={60}  y={100} w={140} h={120} priority="high"     label="mid · high" />
-        <PriorityZone x={0}   y={220} w={200} h={100} priority="normal"   label="west · normal" />
-
-        {/* Fire CA grid overlay */}
-        {simState && simState.cells.flatMap((row, r) =>
-          row.map((cell, c) => {
-            if (cell === 0) return null;
-            return (
-              <rect key={`${r}-${c}`}
-                x={c * CELL_W} y={r * CELL_H} width={CELL_W} height={CELL_H}
-                fill={cell === 1 ? '#f97316' : '#57534e'}
-                opacity={cell === 1 ? 0.75 : 0.45} />
-            );
-          })
-        )}
-
-        {/* Fire zone rings */}
-        {Object.values(fzMap).map(fz => {
-          const rx = fz.radiusM / M_PER_PX_X;
-          const ry = fz.radiusM / M_PER_PX_Y;
-          const stroke = fz.severity === 'critical' ? '#ef4444'
-                       : fz.severity === 'high'     ? '#f97316'
-                       :                              '#facc15';
-          return (
-            <g key={fz.id}>
-              <ellipse cx={fz.svgX} cy={fz.svgY} rx={rx} ry={ry}
-                fill="none" stroke={stroke} strokeWidth="1.5" opacity="0.7"
-                strokeDasharray="4 3" />
-              <circle cx={fz.svgX} cy={fz.svgY} r="3" fill={stroke} opacity="0.9" />
-              <text x={fz.svgX} y={fz.svgY - ry - 3}
-                fontSize="6" fill={stroke} textAnchor="middle" fontFamily="monospace" opacity="0.85">
-                {fz.id}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Manned aircraft layer — Air Tanker 77 on western approach */}
-        <g>
-          <rect x={0} y={126} width={92} height={44}
-            fill="none" stroke="#fbbf24" strokeWidth={0.8} strokeDasharray="5 4" opacity={0.5} />
-          <text x={3} y={136} fontSize={5.5} fill="#fbbf24" fontFamily="monospace" opacity={0.65}>
-            MANNED OPS CORRIDOR
-          </text>
-          {/* Wide diamond — fixed-wing silhouette, distinct from UAS triangles */}
-          <polygon points="48,144 58,148 48,152 38,148" fill="#fbbf24" opacity={0.9} />
-          <text x={48} y={161} fontSize={5} fill="#fbbf24" textAnchor="middle" fontFamily="monospace">
-            AIR TANKER 77
-          </text>
-        </g>
-
-        {/* Assignment lines: drone → target fire zone */}
-        {(lastOptResult?.assignments ?? []).map(a => {
-          const d  = droneMap[a.droneId];
-          const fz = fzMap[a.fireZoneId];
-          if (!d || !fz) return null;
-          return (
-            <line key={`assign-${a.droneId}`}
-              x1={d.svgX}  y1={d.svgY}
-              x2={fz.svgX} y2={fz.svgY}
-              stroke="#22d3ee" strokeWidth="1" strokeDasharray="4 3" opacity="0.6" />
-          );
-        })}
-
-        {/* Mission boundary */}
-        <rect x="80" y="60" width="200" height="200" fill="none" stroke="#e5e5e5" strokeWidth="1" strokeDasharray="3 3" />
-        {[[76,56],[176,56],[276,56],[76,156],[276,156],[76,256],[176,256],[276,256]].map(([x,y],i) => (
-          <rect key={i} x={x} y={y} width="8" height="8" fill="white" />
-        ))}
-
-        {/* Live drone icons — color by status/assignment */}
-        {dronePositions.map(d => {
-          const isAssigned = assignedDrones.has(d.id);
-          const fill = d.status === 'returning' ? '#facc15'
-                     : isAssigned               ? '#22c55e'
-                     :                            '#3b82f6';
-          return (
-            <g key={d.id}>
-              {/* Pulse ring for assigned+active drones */}
-              {isAssigned && (
-                <circle cx={d.svgX} cy={d.svgY} r="9" fill="none"
-                  stroke="#22c55e" strokeWidth="0.8" opacity="0.4" />
-              )}
-              <polygon
-                points={`${d.svgX},${d.svgY - 7} ${d.svgX + 5},${d.svgY + 4} ${d.svgX - 5},${d.svgY + 4}`}
-                fill={fill} />
-              <text x={d.svgX} y={d.svgY + 14} fontSize="5.5"
-                fill={fill} textAnchor="middle" fontFamily="monospace" opacity="0.9">
-                {d.id}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Wind indicator */}
-        <g>
-          <circle cx="340" cy="18" r="10" fill="#1a1a1a" stroke="#404040" strokeWidth="1" opacity="0.8" />
-          <line x1="340" y1="18" x2={ax} y2={ay} stroke="#f97316" strokeWidth="1.5" />
-          <text x="340" y="34" fontSize="6" fill="#a3a3a3" textAnchor="middle" fontFamily="monospace">
-            {windSpeed}km/h
-          </text>
-        </g>
-
-        {/* Legend */}
-        <g>
-          <circle cx="8"  cy="308" r="3" fill="#22c55e" />
-          <text x="14" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">assigned</text>
-          <circle cx="50" cy="308" r="3" fill="#3b82f6" />
-          <text x="56" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">idle</text>
-          <circle cx="74" cy="308" r="3" fill="#facc15" />
-          <text x="80" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">returning</text>
-          <polygon points="120,305 126,308 120,311 114,308" fill="#fbbf24" />
-          <text x="129" y="311" fontSize="5.5" fill="#a3a3a3" fontFamily="monospace">manned</text>
-        </g>
-
-        {/* FIRMS badge */}
-        <text x="4" y="320" fontSize="5.5" fill="#52525b" fontFamily="monospace">NASA FIRMS VIIRS NRT</text>
-
-        {/* Scale / zoom */}
-        <text x="308" y="305" fontSize="8" fill="#a3a3a3" fontFamily="monospace">1 nm</text>
-        <rect x="323" y="280" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
-        <text x="330" y="291" fontSize="11" fill="#e5e5e5" textAnchor="middle">+</text>
-        <rect x="323" y="296" width="14" height="14" fill="#1a1a1a" stroke="#404040" />
-        <text x="330" y="307" fontSize="11" fill="#e5e5e5" textAnchor="middle">−</text>
-      </svg>
-    </div>
-  );
-}
-
-function PriorityZone({ x, y, w, h, priority, label }) {
-  const fill      = { critical: '#dc2626', high: '#facc15', normal: '#22c55e' }[priority];
-  const opacity   = { critical: 0.1,       high: 0.08,      normal: 0.06     }[priority];
-  const textColor = { critical: '#fca5a5', high: '#fde68a', normal: '#86efac' }[priority];
-  return (
-    <g>
-      <rect x={x} y={y} width={w} height={h} fill={fill} opacity={opacity} />
-      <text x={x + 8} y={y + 14} fontSize="9" fill={textColor} fontFamily="sans-serif">{label}</text>
-    </g>
-  );
-}
+// MapView is dynamically imported from ./MapView.js (see top of file).
 
 // ---------------------------------------------------------------------------
 // Resolution panel — 3-column: priority | optimizer | events
