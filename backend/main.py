@@ -271,5 +271,19 @@ def get_mesh() -> MeshStatus:
 
 @app.put("/mesh", tags=["mesh"])
 def update_mesh(mesh_status: MeshStatus) -> MeshStatus:
+    global _mesh_degraded_node, _mesh_degraded_tick
     state.mesh = mesh_status
+    # Find the first degraded node so _update_mesh can auto-recover it after MESH_RECOVER_TICKS
+    degraded = next(
+        (field for field in ("radio", "pingStation", "network")
+         if getattr(mesh_status, field) != ConnectionStatus.ok),
+        None,
+    )
+    if degraded and _mesh_degraded_node is None:
+        g = state.fire_grid
+        _mesh_degraded_node = degraded
+        _mesh_degraded_tick = g.tick if g else 0
+    elif degraded is None:
+        _mesh_degraded_node = None
+        _mesh_degraded_tick = -1
     return state.mesh

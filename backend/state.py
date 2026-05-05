@@ -88,7 +88,7 @@ def seed() -> None:
               battery=89, payload="thermal_camera"),
         Drone(id="UAS-07", name="UAS-07", status=DroneStatus.grounded,
               position=DronePosition(lat=36.5100, lng=-121.5380, alt=0),
-              battery=12, payload="retardant_coverage_tracker"),
+              battery=12, payload="IR_sensor"),
         Drone(id="UAS-09", name="UAS-09", status=DroneStatus.grounded,
               position=DronePosition(lat=36.5160, lng=-121.5400, alt=0),
               battery=0,  payload="sensor_array"),
@@ -97,7 +97,7 @@ def seed() -> None:
               battery=95, payload="thermal_camera"),
         Drone(id="UAS-12", name="UAS-12", status=DroneStatus.returning,
               position=DronePosition(lat=36.5180, lng=-121.5320, alt=800),
-              battery=35, payload="retardant_coverage_tracker"),
+              battery=35, payload="IR_sensor"),
         # Northern row
         Drone(id="UAS-01", name="UAS-01", status=DroneStatus.idle,
               position=DronePosition(lat=36.5270, lng=-121.5430, alt=0),
@@ -117,7 +117,7 @@ def seed() -> None:
               battery=68, payload="thermal_camera"),
         Drone(id="UAS-08", name="UAS-08", status=DroneStatus.idle,
               position=DronePosition(lat=36.5150, lng=-121.5300, alt=0),
-              battery=93, payload="retardant_coverage_tracker"),
+              battery=93, payload="IR_sensor"),
         Drone(id="UAS-10", name="UAS-10", status=DroneStatus.returning,
               position=DronePosition(lat=36.5130, lng=-121.5220, alt=600),
               battery=28, payload="thermal_camera"),
@@ -130,7 +130,7 @@ def seed() -> None:
               battery=54, payload="thermal_camera"),
         Drone(id="UAS-15", name="UAS-15", status=DroneStatus.idle,
               position=DronePosition(lat=36.5030, lng=-121.5250, alt=0),
-              battery=79, payload="retardant_coverage_tracker"),
+              battery=79, payload="IR_sensor"),
         Drone(id="UAS-16", name="UAS-16", status=DroneStatus.returning,
               position=DronePosition(lat=36.5020, lng=-121.5180, alt=500),
               battery=31, payload="sensor_array"),
@@ -146,7 +146,7 @@ def seed() -> None:
               battery=47, payload="thermal_camera"),
         Drone(id="UAS-20", name="UAS-20", status=DroneStatus.returning,
               position=DronePosition(lat=36.5250, lng=-121.5400, alt=700),
-              battery=22, payload="retardant_coverage_tracker"),
+              battery=22, payload="IR_sensor"),
     ]:
         drones[d.id] = d
 

@@ -243,7 +243,6 @@ function StatusBar({ mission, mesh, operator, simState, optFlash, replanDegraded
           style={{ background: badgeColor, color: '#fff' }}>
           {operator.role}
         </span>
-        <span className="text-zinc-400">{operator.name}</span>
       </div>
       <div className="flex items-center gap-3">
         {simState && (

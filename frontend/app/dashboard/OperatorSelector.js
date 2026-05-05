@@ -66,9 +66,7 @@ export default function OperatorSelector({ onSelect }) {
                 >
                   {op.role}
                 </span>
-                <span className="text-sm font-medium text-zinc-100">{op.name}</span>
                 <span className="text-[10px] text-zinc-400 leading-relaxed">{ROLE_DESC[op.role]}</span>
-                <span className="text-[9px] text-zinc-600 font-mono mt-1">{op.id}</span>
               </button>
             );
           })}
