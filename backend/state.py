@@ -10,12 +10,14 @@ from models import (
     Drone, DronePosition, FireZone, MeshStatus,
     Priority, DroneStatus, ConnectionStatus,
     Operator, OperatorRole,
+    MissionRequest, MissionRequestStatus,
 )
 from fire_sim import FireGrid
 
 regions: dict[str, Region] = {}
 events: list[Event] = []
 missions: dict[str, Mission] = {}
+mission_requests: dict[str, MissionRequest] = {}
 drones: dict[str, Drone] = {}
 fire_zones: dict[str, FireZone] = {}
 operators: dict[str, Operator] = {}
@@ -178,6 +180,19 @@ def seed() -> None:
         Operator(id="op-dsp-01", name="Dispatch Nguyen", role=OperatorRole.dispatch),
     ]:
         operators[op.id] = op
+
+    # Demo mission request from the seeded pilot
+    req = MissionRequest(
+        id="REQ-001",
+        requested_by="op-plt-04",
+        status=MissionRequestStatus.pending,
+        submitted_at="11:12",
+        location=Location(lat=36.5200, lng=-121.5280),
+        volume=Volume(width=0.5, height=0.5, minAlt=0, maxAlt=800),
+        duration=20,
+        notes="Spotted smoke column northeast of FIRE-01, requesting recon pass",
+    )
+    mission_requests[req.id] = req
 
     # Mesh — all nodes start ok; degradation simulation takes over from tick 15
     global mesh

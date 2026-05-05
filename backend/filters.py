@@ -1,4 +1,4 @@
-from models import Drone, Mission, FireZone, Event, Operator, OperatorRole
+from models import Drone, Mission, FireZone, Event, Operator, OperatorRole, MissionRequest
 
 _PUBLIC_EVENT_TYPES = {"mission_completed", "priority_changed"}
 
@@ -45,6 +45,14 @@ def filter_fires(fires: list[FireZone], op: Operator) -> list[dict]:
                 result.append(d)
         return result
     return [fz.model_dump() for fz in fires]
+
+
+def filter_mission_requests(requests: list[MissionRequest], op: Operator) -> list[dict]:
+    if op.role in (OperatorRole.commander, OperatorRole.atgs, OperatorRole.dispatch):
+        return [r.model_dump() for r in requests]
+    if op.role == OperatorRole.pilot:
+        return [r.model_dump() for r in requests if r.requested_by == op.id]
+    return []
 
 
 def filter_events(events: list[Event], op: Operator) -> list[dict]:

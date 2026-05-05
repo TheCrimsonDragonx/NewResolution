@@ -52,6 +52,9 @@ class FireGrid:
     age: List[List[int]] = field(
         default_factory=lambda: [[0] * COLS for _ in range(ROWS)]
     )
+    # Cached counts — updated in step() and reset(); avoids scanning 900 cells per request
+    _burning: int = field(default=0, init=False, repr=False)
+    _burnt: int = field(default=0, init=False, repr=False)
 
     def ignite(self, row: int, col: int) -> None:
         if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -103,14 +106,24 @@ class FireGrid:
         self.cells = new_cells
         self.age   = new_age
         self.tick += 1
+        # Recompute counts once per tick; all callers use the cached values
+        burning = burnt = 0
+        for row in self.cells:
+            for v in row:
+                if v == BURNING: burning += 1
+                elif v == BURNT: burnt += 1
+        self._burning = burning
+        self._burnt   = burnt
 
     def burning_count(self) -> int:
-        return sum(c == BURNING for row in self.cells for c in row)
+        return self._burning
 
     def burnt_count(self) -> int:
-        return sum(c == BURNT for row in self.cells for c in row)
+        return self._burnt
 
     def reset(self) -> None:
         self.cells = [[EMPTY] * self.cols for _ in range(self.rows)]
         self.age   = [[0]     * self.cols for _ in range(self.rows)]
         self.tick  = 0
+        self._burning = 0
+        self._burnt   = 0

@@ -43,45 +43,67 @@ const T77_ICON = L.divIcon({
 // ─── Live layer updater — must be a child of MapContainer ───────────────────
 
 function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
-  const map        = useMap();
-  const fireRef    = useRef(null);
-  const opsRef     = useRef(null);
-  const canvasRef  = useRef(null);
-  const initRef    = useRef(false);
+  const map           = useMap();
+  const fireRef       = useRef(null);
+  const staticRef     = useRef(null);   // slow-changing: regions, fire zones, corridor
+  const dynamicRef    = useRef(null);   // fast-changing: drone markers + assignment lines
+  const canvasRef     = useRef(null);
+  const initRef       = useRef(false);
+  const prevTickRef   = useRef(-1);
+  const prevCellsRef  = useRef(null);
+  const cellLayersRef = useRef(new Map());
 
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
     canvasRef.current = L.canvas({ padding: 0.5 });
     fireRef.current   = L.layerGroup().addTo(map);
-    opsRef.current    = L.layerGroup().addTo(map);
+    staticRef.current = L.layerGroup().addTo(map);
+    dynamicRef.current = L.layerGroup().addTo(map);
   }, [map]);
 
-  // Fire CA grid — rebuilt every 2 s when simState updates
+  // Fire CA grid — only touch cells whose state changed since last tick
   useEffect(() => {
     if (!simState || !fireRef.current) return;
-    fireRef.current.clearLayers();
-    const renderer = canvasRef.current;
-    simState.cells.forEach((row, r) => {
-      row.forEach((cell, c) => {
-        if (cell === 0) return;
-        L.rectangle(cellBounds(r, c), {
-          renderer,
-          stroke:      false,
-          fillColor:   cell === 1 ? '#f97316' : '#57534e',
-          fillOpacity: cell === 1 ? 0.72 : 0.38,
-        }).addTo(fireRef.current);
+    if (simState.tick === prevTickRef.current) return;
+    prevTickRef.current = simState.tick;
+
+    const renderer  = canvasRef.current;
+    const newCells  = simState.cells;
+    const prevCells = prevCellsRef.current;
+    const layerMap  = cellLayersRef.current;
+
+    newCells.forEach((row, r) => {
+      row.forEach((newCell, c) => {
+        const prevCell = prevCells ? prevCells[r][c] : -1;
+        if (newCell === prevCell) return;
+
+        const key = `${r},${c}`;
+        if (newCell === 0) {
+          const layer = layerMap.get(key);
+          if (layer) { fireRef.current.removeLayer(layer); layerMap.delete(key); }
+        } else {
+          const fillColor   = newCell === 1 ? '#f97316' : '#57534e';
+          const fillOpacity = newCell === 1 ? 0.72      : 0.38;
+          const existing = layerMap.get(key);
+          if (existing) {
+            existing.setStyle({ fillColor, fillOpacity });
+          } else {
+            layerMap.set(key, L.rectangle(cellBounds(r, c), {
+              renderer, stroke: false, fillColor, fillOpacity,
+            }).addTo(fireRef.current));
+          }
+        }
       });
     });
+
+    prevCellsRef.current = newCells;
   }, [simState]);
 
-  // Operational layer: regions, fire zones, drones, assignment lines, manned aircraft
+  // Static layer: regions, fire zones, corridor, manned aircraft — only rebuilds when fireZones changes (~6s)
   useEffect(() => {
-    if (!opsRef.current) return;
-    opsRef.current.clearLayers();
-
-    const assignedSet = new Set((lastOptResult?.assignments ?? []).map(a => a.droneId));
-    const fzPos = {};
+    if (!staticRef.current) return;
+    staticRef.current.clearLayers();
 
     // Priority region overlays
     [
@@ -92,23 +114,50 @@ function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
       L.rectangle(b, {
         color: c, weight: 1, fillColor: c, fillOpacity: 0.07, dashArray: '4 3',
       }).bindTooltip(t, { sticky: true, className: 'res-tip' })
-        .addTo(opsRef.current);
+        .addTo(staticRef.current);
     });
 
     // Fire zone rings + permanent ID labels
     fireZones.forEach(fz => {
       if (!fz.location) return;
-      fzPos[fz.id] = [fz.location.lat, fz.location.lng];
       const c = fz.severity === 'critical' ? '#ef4444'
               : fz.severity === 'high'     ? '#f97316'
               :                              '#facc15';
       L.circle([fz.location.lat, fz.location.lng], {
         radius: fz.radiusM, color: c, weight: 1.5, fillOpacity: 0.05, dashArray: '5 4',
-      }).addTo(opsRef.current);
+      }).addTo(staticRef.current);
       L.circleMarker([fz.location.lat, fz.location.lng], {
         radius: 3.5, fillColor: c, fillOpacity: 1, color: c, weight: 0,
       }).bindTooltip(fz.id, { permanent: true, direction: 'top', className: 'res-label' })
-        .addTo(opsRef.current);
+        .addTo(staticRef.current);
+    });
+
+    // Manned ops corridor
+    L.rectangle([[36.512, -121.545], [36.520, -121.534]], {
+      color: '#fbbf24', weight: 1, fillOpacity: 0.04, dashArray: '6 4',
+    }).bindTooltip('MANNED OPS CORRIDOR', { className: 'res-tip' })
+      .addTo(staticRef.current);
+
+    // Air Tanker 77
+    L.marker([36.516, -121.540], { icon: T77_ICON })
+      .bindTooltip('<b style="color:#fbbf24">Air Tanker 77</b><br/>Manned · On approach', {
+        direction: 'top', className: 'res-tip',
+      })
+      .addTo(staticRef.current);
+
+  }, [fireZones]);
+
+  // Dynamic layer: drone markers + assignment lines — rebuilds every 2s with drone positions
+  useEffect(() => {
+    if (!dynamicRef.current) return;
+    dynamicRef.current.clearLayers();
+
+    const assignedSet = new Set((lastOptResult?.assignments ?? []).map(a => a.droneId));
+
+    // Build fzPos index from the assignments (fire zone positions needed for lines)
+    const fzPos = {};
+    fireZones.forEach(fz => {
+      if (fz.location) fzPos[fz.id] = [fz.location.lat, fz.location.lng];
     });
 
     // Assignment lines — drone → target fire zone
@@ -118,10 +167,10 @@ function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
       if (!d?.position || !fp) return;
       L.polyline([[d.position.lat, d.position.lng], fp], {
         color: '#22d3ee', weight: 1.2, dashArray: '5 4', opacity: 0.65,
-      }).addTo(opsRef.current);
+      }).addTo(dynamicRef.current);
     });
 
-    // Drones
+    // Drone markers
     drones.forEach(d => {
       if (!d.position || d.status === 'grounded') return;
       const assigned = assignedSet.has(d.id);
@@ -133,23 +182,10 @@ function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
           `<b style="color:${c}">${d.id}</b><br/>${d.battery}% · ${d.status}<br/>${(d.payload || '').replace(/_/g, ' ')}`,
           { direction: 'top', className: 'res-tip' },
         )
-        .addTo(opsRef.current);
+        .addTo(dynamicRef.current);
     });
 
-    // Manned ops corridor
-    L.rectangle([[36.512, -121.545], [36.520, -121.534]], {
-      color: '#fbbf24', weight: 1, fillOpacity: 0.04, dashArray: '6 4',
-    }).bindTooltip('MANNED OPS CORRIDOR', { className: 'res-tip' })
-      .addTo(opsRef.current);
-
-    // Air Tanker 77
-    L.marker([36.516, -121.540], { icon: T77_ICON })
-      .bindTooltip('<b style="color:#fbbf24">Air Tanker 77</b><br/>Manned · On approach', {
-        direction: 'top', className: 'res-tip',
-      })
-      .addTo(opsRef.current);
-
-  }, [drones, fireZones, lastOptResult]);
+  }, [drones, lastOptResult]);
 
   return null;
 }

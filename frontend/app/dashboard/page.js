@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import dynamic from 'next/dynamic';
 import OperatorSelector from './OperatorSelector';
 
@@ -48,14 +48,16 @@ export default function DashboardPage() {
   const [drones,        setDrones]        = useState([]);
   const [fireZones,     setFireZones]     = useState([]);
   const [simState,      setSimState]      = useState(null);
-  const [lastOptResult,   setLastOptResult]   = useState(null);
-  const [optFlash,        setOptFlash]        = useState(false);
-  const [replanDegraded,  setReplanDegraded]  = useState(false);
-  const [backendOk,       setBackendOk]       = useState(null);
+  const [lastOptResult,    setLastOptResult]    = useState(null);
+  const [optFlash,         setOptFlash]         = useState(false);
+  const [replanDegraded,   setReplanDegraded]   = useState(false);
+  const [backendOk,        setBackendOk]        = useState(null);
+  const [missionRequests,  setMissionRequests]  = useState([]);
 
   const prevBurningRef        = useRef(0);
-  const lastReplanEventIdRef  = useRef(null);   // prevents re-triggering on same event
-  const lastOptTriggerRef     = useRef(0);      // timestamp of last frontend-triggered /run
+  const lastReplanEventIdRef  = useRef(null);
+  const lastOptTriggerRef     = useRef(0);
+  const pollCountRef          = useRef(0);
 
   useEffect(() => {
     const stored = localStorage.getItem('wildfire_operator');
@@ -69,55 +71,33 @@ export default function DashboardPage() {
     });
   }
 
-  // Slow poll (5s): stable data — regions, events, missions, mesh, fire zones
-  async function fetchAll(op) {
-    try {
-      const [regRes, evtRes, msnRes, meshRes, fzRes] = await Promise.all([
-        fetch(`${BACKEND}/regions/`),
-        apiFetch('/events/?limit=10', op),
-        apiFetch('/missions/', op),
-        fetch(`${BACKEND}/mesh`),
-        apiFetch('/fires/', op),
-      ]);
-      const [regs, evts, missions, meshData, fzData] = await Promise.all([
-        regRes.json(), evtRes.json(), msnRes.json(), meshRes.json(), fzRes.json(),
-      ]);
-      setRegions(regs);
-      setEvents(evts);
-      setAllMissions(missions);
-      setMission(missions[0] ?? null);
-      setMesh(meshData);
-      setFireZones(fzData.filter(fz => fz.active !== false));
-      setBackendOk(true);
-
-      // Check if the most recent optimizer_rerun event was flagged as degraded comms
-      const replanEvt = evts.find(e => e.type === 'optimizer_rerun' && e.message.includes('DEGRADED COMMS'));
-      if (replanEvt && replanEvt.id !== lastReplanEventIdRef.current) {
-        lastReplanEventIdRef.current = replanEvt.id;
-        setReplanDegraded(true);
-        setTimeout(() => setReplanDegraded(false), 10_000);
-      }
-    } catch {
-      setBackendOk(false);
-    }
-  }
-
+  // Single unified poll: fast data every 2s, slow data every 6s (every 3rd tick)
   useEffect(() => {
     if (!operator) return;
-    fetchAll(operator);
-    const id = setInterval(() => fetchAll(operator), 5000);
-    return () => clearInterval(id);
-  }, [operator]);
 
-  // Fast poll (2s): drone positions + fire simulation state
-  useEffect(() => {
-    if (!operator) return;
-    async function fetchFast() {
+    async function poll() {
+      const isSlowTick = pollCountRef.current % 3 === 0;
+      pollCountRef.current += 1;
+
       try {
-        const [simRes, droneRes] = await Promise.all([
+        const promises = [
           fetch(`${BACKEND}/fires/simulation/state`),
           apiFetch('/drones/', operator),
-        ]);
+          apiFetch('/optimizer/last-result', operator),
+        ];
+        if (isSlowTick) {
+          promises.push(
+            fetch(`${BACKEND}/regions/`),
+            apiFetch('/events/?limit=10', operator),
+            apiFetch('/missions/', operator),
+            fetch(`${BACKEND}/mesh`),
+            apiFetch('/fires/', operator),
+            apiFetch('/missions/requests/', operator),
+          );
+        }
+
+        const [simRes, droneRes, optRes, ...slowRes] = await Promise.all(promises);
+
         if (simRes.ok) {
           const data = await simRes.json();
           setSimState(data);
@@ -138,31 +118,43 @@ export default function DashboardPage() {
           }
         }
         if (droneRes.ok) setDrones(await droneRes.json());
-      } catch { /* backend not ready */ }
-    }
-    fetchFast();
-    const id = setInterval(fetchFast, 2000);
-    return () => clearInterval(id);
-  }, [operator]);
+        if (optRes.ok) setLastOptResult(await optRes.json());
 
-  // Optimizer poll (3s): assignments + QUBO result — all four roles
-  useEffect(() => {
-    if (!operator) return;
-    async function fetchOpt() {
-      try {
-        const res = await apiFetch('/optimizer/last-result', operator);
-        if (res.ok) setLastOptResult(await res.json());
-      } catch { /* ignore */ }
+        if (isSlowTick && slowRes.length > 0) {
+          setBackendOk(true);
+          const [regRes, evtRes, msnRes, meshRes, fzRes, mreqRes] = slowRes;
+          const [regs, evts, missions, meshData, fzData] = await Promise.all([
+            regRes.json(), evtRes.json(), msnRes.json(), meshRes.json(), fzRes.json(),
+          ]);
+          setRegions(regs);
+          setEvents(evts);
+          setAllMissions(missions);
+          setMission(missions[0] ?? null);
+          setMesh(meshData);
+          setFireZones(fzData.filter(fz => fz.active !== false));
+          if (mreqRes?.ok) setMissionRequests(await mreqRes.json());
+
+          const replanEvt = evts.find(e => e.type === 'optimizer_rerun' && e.message.includes('DEGRADED COMMS'));
+          if (replanEvt && replanEvt.id !== lastReplanEventIdRef.current) {
+            lastReplanEventIdRef.current = replanEvt.id;
+            setReplanDegraded(true);
+            setTimeout(() => setReplanDegraded(false), 10_000);
+          }
+        }
+      } catch {
+        if (isSlowTick) setBackendOk(false);
+      }
     }
-    fetchOpt();
-    const id = setInterval(fetchOpt, 3000);
+
+    poll();
+    const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   }, [operator]);
 
   if (!operator) {
     return (
       <OperatorSelector
-        onSelect={(op) => { setOperator(op); fetchAll(op); }}
+        onSelect={(op) => setOperator(op)}
       />
     );
   }
@@ -187,6 +179,13 @@ export default function DashboardPage() {
     );
   }
 
+  async function refreshRequests() {
+    try {
+      const res = await apiFetch('/missions/requests/', operator);
+      if (res.ok) setMissionRequests(await res.json());
+    } catch { /* ignore */ }
+  }
+
   function switchOperator() {
     localStorage.removeItem('wildfire_operator');
     setOperator(null);
@@ -197,6 +196,7 @@ export default function DashboardPage() {
     setSimState(null);
     setLastOptResult(null);
     setBackendOk(null);
+    setMissionRequests([]);
   }
 
   return (
@@ -213,6 +213,9 @@ export default function DashboardPage() {
         drones={drones} operator={operator}
         simState={simState} optFlash={optFlash}
         lastOptResult={lastOptResult}
+        fireZones={fireZones}
+        missionRequests={missionRequests}
+        onRefreshRequests={refreshRequests}
       />
     </div>
   );
@@ -339,7 +342,90 @@ function NavItem({ item, active, onClick, accent }) {
 // Operation Setup panel
 // ---------------------------------------------------------------------------
 
-function OperationSetup({ mission, operator }) {
+function Field({ label, children, mono }) {
+  return (
+    <div className="mb-2.5">
+      <div className="text-zinc-500 mb-1">{label}</div>
+      <div className={mono ? 'font-mono text-[10px]' : ''}>{children}</div>
+    </div>
+  );
+}
+
+function FieldInline({ label, children }) {
+  return (
+    <div className="flex justify-between items-center text-[10px] mb-1">
+      <span className="text-zinc-400">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function Pill({ children }) {
+  return <span className="px-2 py-0.5 rounded text-[10px]" style={{ background: '#2a2a2a' }}>{children}</span>;
+}
+
+function Toggle({ checked }) {
+  return (
+    <span className={`w-7 h-3.5 ${checked ? 'bg-blue-600' : 'bg-zinc-700'} rounded-full relative inline-block`}>
+      <span className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all"
+        style={{ [checked ? 'right' : 'left']: '2px' }} />
+    </span>
+  );
+}
+
+// MapView is dynamically imported from ./MapView.js (see top of file).
+
+// ---------------------------------------------------------------------------
+// Resolution panel — 3-column: priority | optimizer | events
+// ---------------------------------------------------------------------------
+
+const ResolutionPanel = memo(function ResolutionPanel({ regions, events, mission, allMissions, drones, operator, simState, optFlash, lastOptResult, fireZones, missionRequests, onRefreshRequests }) {
+  return (
+    <div className="border-t px-4 py-3 grid grid-cols-3 gap-4 flex-shrink-0"
+      style={{ background: '#2a1a0a', borderColor: '#ea580c' }}>
+      <PriorityFlexBlock regions={regions} mission={mission} allMissions={allMissions} simState={simState} optFlash={optFlash} />
+      <OptimizerBlock lastOptResult={lastOptResult} drones={drones} operator={operator} fireZones={fireZones} missionRequests={missionRequests} onRefreshRequests={onRefreshRequests} />
+      <StatusFeedBlock events={events} drones={drones} />
+    </div>
+  );
+});
+
+const StatusFeedBlock = memo(function StatusFeedBlock({ events, drones }) {
+  const summary = drones.find(d => d.summary);
+  const active    = summary ? summary.active    : drones.filter(d => d.status === 'active').length;
+  const returning = summary ? summary.returning : drones.filter(d => d.status === 'returning').length;
+  const idle      = summary ? summary.idle      : drones.filter(d => d.status === 'idle').length;
+  const grounded  = summary ? summary.grounded  : drones.filter(d => d.status === 'grounded').length;
+  const total     = summary ? summary.total     : drones.filter(d => d.id).length;
+
+  return (
+    <div>
+      <SectionHeader>Fleet · mission status</SectionHeader>
+      <div className="flex gap-3 mb-2 text-[10px]">
+        <span><span className="font-mono" style={{ color: '#22c55e' }}>{active}</span> active</span>
+        <span><span className="font-mono" style={{ color: '#3b82f6' }}>{idle}</span> idle</span>
+        <span><span className="font-mono" style={{ color: '#facc15' }}>{returning}</span> rtb</span>
+        <span><span className="font-mono text-zinc-500">{grounded}</span> gnd</span>
+        <span className="text-zinc-600">/ {total}</span>
+      </div>
+      <div className="text-[10px] leading-relaxed max-h-20 overflow-y-auto">
+        {events.length === 0 ? (
+          <div className="text-zinc-600">No events for your access level</div>
+        ) : (
+          events.map((e) => (
+            <div key={e.id} className="flex gap-2"
+              style={{ color: e.type === 'optimizer_rerun' ? '#c084fc' : undefined }}>
+              <span className="text-zinc-500 font-mono flex-shrink-0">{e.ts}</span>
+              <span className={e.type === 'optimizer_rerun' ? '' : 'text-zinc-200'}>{e.message}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+});
+
+const OperationSetup = memo(function OperationSetup({ mission, operator }) {
   return (
     <div className="p-3 border-r text-[11px] flex-shrink-0" style={{ width: '210px', borderColor: '#2a2a2a' }}>
       <div className="text-zinc-400 text-[10px] mb-2">← Operation Setup</div>
@@ -378,55 +464,7 @@ function OperationSetup({ mission, operator }) {
       )}
     </div>
   );
-}
-
-function Field({ label, children, mono }) {
-  return (
-    <div className="mb-2.5">
-      <div className="text-zinc-500 mb-1">{label}</div>
-      <div className={mono ? 'font-mono text-[10px]' : ''}>{children}</div>
-    </div>
-  );
-}
-
-function FieldInline({ label, children }) {
-  return (
-    <div className="flex justify-between items-center text-[10px] mb-1">
-      <span className="text-zinc-400">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function Pill({ children }) {
-  return <span className="px-2 py-0.5 rounded text-[10px]" style={{ background: '#2a2a2a' }}>{children}</span>;
-}
-
-function Toggle({ checked }) {
-  return (
-    <span className={`w-7 h-3.5 ${checked ? 'bg-blue-600' : 'bg-zinc-700'} rounded-full relative inline-block`}>
-      <span className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all"
-        style={{ [checked ? 'right' : 'left']: '2px' }} />
-    </span>
-  );
-}
-
-// MapView is dynamically imported from ./MapView.js (see top of file).
-
-// ---------------------------------------------------------------------------
-// Resolution panel — 3-column: priority | optimizer | events
-// ---------------------------------------------------------------------------
-
-function ResolutionPanel({ regions, events, mission, allMissions, drones, operator, simState, optFlash, lastOptResult }) {
-  return (
-    <div className="border-t px-4 py-3 grid grid-cols-3 gap-4 flex-shrink-0"
-      style={{ background: '#2a1a0a', borderColor: '#ea580c' }}>
-      <PriorityFlexBlock regions={regions} mission={mission} allMissions={allMissions} simState={simState} optFlash={optFlash} />
-      <OptimizerBlock lastOptResult={lastOptResult} drones={drones} operator={operator} />
-      <StatusFeedBlock events={events} drones={drones} />
-    </div>
-  );
-}
+});
 
 function PriorityFlexBlock({ regions, mission, allMissions, simState, optFlash }) {
   return (
@@ -476,11 +514,12 @@ function PriorityFlexBlock({ regions, mission, allMissions, simState, optFlash }
   );
 }
 
-function OptimizerBlock({ lastOptResult, drones, operator }) {
+function OptimizerBlock({ lastOptResult, drones, operator, fireZones, missionRequests, onRefreshRequests }) {
   const [benchData,    setBenchData]    = useState(null);
   const [benchLoading, setBenchLoading] = useState(false);
 
-  const isAtgs = operator?.role === 'atgs';
+  const isAtgs      = operator?.role === 'atgs';
+  const isPilot     = operator?.role === 'pilot';
   const isCommander = operator?.role === 'commander';
   const droneIndex = Object.fromEntries(drones.filter(d => d.id).map(d => [d.id, d]));
 
@@ -498,6 +537,10 @@ function OptimizerBlock({ lastOptResult, drones, operator }) {
 
   if (isAtgs) {
     return <AircraftSeparationPanel drones={drones} lastOptResult={lastOptResult} />;
+  }
+
+  if (isPilot) {
+    return <MissionRequestPanel operator={operator} fireZones={fireZones} missionRequests={missionRequests} onRefresh={onRefreshRequests} />;
   }
 
   const statusColor = lastOptResult?.status === 'qubo'   ? '#22d3ee'
@@ -620,13 +663,9 @@ function OptimizerBlock({ lastOptResult, drones, operator }) {
               <div className="text-[9px] font-mono text-zinc-500 mb-1.5 leading-tight">
                 {lastOptResult.message}
               </div>
-              <div className="flex flex-col gap-0.5 max-h-16 overflow-y-auto">
+              <div className="flex flex-col gap-0.5 max-h-12 overflow-y-auto">
                 {(lastOptResult.assignments ?? []).length === 0 ? (
-                  <div className="text-[9px] text-zinc-600">
-                    {operator.role === 'pilot'
-                      ? 'Your drone is not assigned in the current cycle — another asset was prioritized'
-                      : 'No assignments in current cycle'}
-                  </div>
+                  <div className="text-[9px] text-zinc-600">No assignments in current cycle</div>
                 ) : (
                   (lastOptResult.assignments ?? []).map(a => {
                     const d = droneIndex[a.droneId];
@@ -646,6 +685,188 @@ function OptimizerBlock({ lastOptResult, drones, operator }) {
             </>
           )}
         </>
+      )}
+
+      {/* Pending mission requests — visible to commander + dispatch */}
+      {(isCommander || operator?.role === 'dispatch') && missionRequests?.length > 0 && (
+        <PendingRequestsQueue requests={missionRequests} operator={operator} onRefresh={onRefreshRequests} />
+      )}
+    </div>
+  );
+}
+
+function PendingRequestsQueue({ requests, operator, onRefresh }) {
+  const [acting, setActing] = useState(null);
+
+  const pending = requests.filter(r => r.status === 'pending');
+
+  async function act(reqId, action) {
+    setActing(reqId);
+    try {
+      await fetch(`${BACKEND}/missions/requests/${reqId}/${action}`, {
+        method: 'POST',
+        headers: { 'X-Operator-ID': operator.id, 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      onRefresh();
+    } catch { /* ignore */ }
+    setActing(null);
+  }
+
+  if (pending.length === 0) return null;
+
+  return (
+    <div className="mt-2 pt-2" style={{ borderTop: '1px solid #3a2a0a' }}>
+      <div className="text-[9px] font-mono mb-1" style={{ color: '#ea580c' }}>
+        PENDING REQUESTS ({pending.length})
+      </div>
+      <div className="flex flex-col gap-1 max-h-20 overflow-y-auto">
+        {pending.map(r => (
+          <div key={r.id} className="flex items-center gap-1 text-[9px]">
+            <span className="font-mono text-zinc-400 flex-shrink-0">{r.id}</span>
+            <span className="text-zinc-600 truncate flex-1">{r.notes || `${r.duration}min`}</span>
+            <button
+              disabled={acting === r.id}
+              onClick={() => act(r.id, 'approve')}
+              className="px-1.5 py-0.5 rounded font-mono flex-shrink-0"
+              style={{ background: '#052e16', color: '#4ade80', border: '1px solid #166534', opacity: acting === r.id ? 0.5 : 1 }}
+            >✓</button>
+            <button
+              disabled={acting === r.id}
+              onClick={() => act(r.id, 'reject')}
+              className="px-1.5 py-0.5 rounded font-mono flex-shrink-0"
+              style={{ background: '#450a0a', color: '#f87171', border: '1px solid #991b1b', opacity: acting === r.id ? 0.5 : 1 }}
+            >✕</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MissionRequestPanel({ operator, fireZones, missionRequests, onRefresh }) {
+  const [selectedZone, setSelectedZone] = useState('');
+  const [duration,     setDuration]     = useState('30');
+  const [notes,        setNotes]        = useState('');
+  const [submitting,   setSubmitting]   = useState(false);
+  const [flash,        setFlash]        = useState(null); // 'ok' | 'err:<msg>'
+
+  async function submit() {
+    if (!selectedZone) return;
+    setSubmitting(true);
+    setFlash(null);
+    try {
+      const fz = fireZones.find(z => z.id === selectedZone);
+      const body = {
+        location: { lat: fz.location.lat, lng: fz.location.lng },
+        volume:   { width: 0.5, height: 0.5, minAlt: 300, maxAlt: 1000 },
+        duration: parseInt(duration) || 30,
+        notes:    notes || null,
+      };
+      const res = await fetch(`${BACKEND}/missions/requests/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Operator-ID': operator.id },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setSelectedZone('');
+        setDuration('30');
+        setNotes('');
+        setFlash('ok');
+        setTimeout(() => setFlash(null), 3000);
+        onRefresh();
+      } else {
+        const err = await res.json();
+        setFlash(`err:${err.detail ?? 'Submit failed'}`);
+      }
+    } catch {
+      setFlash('err:Network error');
+    }
+    setSubmitting(false);
+  }
+
+  const myRequests = (missionRequests ?? []).slice().reverse();
+
+  const inputStyle = {
+    background: '#1a1a1a', border: '1px solid #3a3a3a', color: '#e4e4e7',
+    borderRadius: 3, padding: '2px 6px', fontSize: 10, width: '100%',
+  };
+
+  return (
+    <div>
+      <SectionHeader>Mission Request</SectionHeader>
+
+      {/* Submit form */}
+      <div className="flex flex-col gap-1 mb-2">
+        <select
+          value={selectedZone}
+          onChange={e => setSelectedZone(e.target.value)}
+          style={{ ...inputStyle, cursor: 'pointer' }}
+        >
+          <option value="">— select fire zone —</option>
+          {(fireZones ?? []).map(fz => (
+            <option key={fz.id} value={fz.id}>{fz.id} · {fz.severity}</option>
+          ))}
+        </select>
+        <div className="flex gap-1">
+          <input
+            type="number" min="5" max="240" value={duration}
+            onChange={e => setDuration(e.target.value)}
+            placeholder="duration (min)"
+            style={{ ...inputStyle, width: 90 }}
+          />
+          <input
+            type="text" value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="notes (optional)"
+            style={inputStyle}
+          />
+        </div>
+        <button
+          onClick={submit}
+          disabled={!selectedZone || submitting}
+          className="text-[9px] px-2 py-1 rounded font-mono font-medium transition"
+          style={{
+            background: (!selectedZone || submitting) ? '#1a1a1a' : '#1c1917',
+            color:      (!selectedZone || submitting) ? '#52525b' : '#f97316',
+            border:     '1px solid #f97316',
+            opacity:    (!selectedZone || submitting) ? 0.5 : 1,
+            cursor:     (!selectedZone || submitting) ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {submitting ? 'submitting…' : 'Submit Request'}
+        </button>
+        {flash === 'ok' && (
+          <div className="text-[9px]" style={{ color: '#4ade80' }}>Request submitted successfully</div>
+        )}
+        {flash?.startsWith('err:') && (
+          <div className="text-[9px]" style={{ color: '#f87171' }}>{flash.slice(4)}</div>
+        )}
+      </div>
+
+      {/* Own request history */}
+      {myRequests.length > 0 && (
+        <>
+          <div className="text-[9px] font-mono mb-0.5" style={{ color: '#52525b' }}>YOUR REQUESTS</div>
+          <div className="flex flex-col gap-0.5 max-h-16 overflow-y-auto">
+            {myRequests.map(r => {
+              const statusColor = r.status === 'approved' ? '#4ade80'
+                                : r.status === 'rejected' ? '#f87171'
+                                :                           '#facc15';
+              return (
+                <div key={r.id} className="flex items-center gap-1.5 text-[9px] font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: statusColor }} />
+                  <span className="text-zinc-400">{r.id}</span>
+                  <span className="text-zinc-600">{r.duration}min</span>
+                  <span className="ml-auto" style={{ color: statusColor }}>{r.status}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {myRequests.length === 0 && (
+        <div className="text-[9px] text-zinc-600">No requests submitted yet</div>
       )}
     </div>
   );
@@ -735,41 +956,6 @@ function AircraftSeparationPanel({ drones, lastOptResult }) {
           {lastOptResult.assignments.length} active assignments · {Math.round((lastOptResult.totalCoverage ?? 0) * 100)}% coverage
         </div>
       )}
-    </div>
-  );
-}
-
-function StatusFeedBlock({ events, drones }) {
-  const summary = drones.find(d => d.summary);
-  const active    = summary ? summary.active    : drones.filter(d => d.status === 'active').length;
-  const returning = summary ? summary.returning : drones.filter(d => d.status === 'returning').length;
-  const idle      = summary ? summary.idle      : drones.filter(d => d.status === 'idle').length;
-  const grounded  = summary ? summary.grounded  : drones.filter(d => d.status === 'grounded').length;
-  const total     = summary ? summary.total     : drones.filter(d => d.id).length;
-
-  return (
-    <div>
-      <SectionHeader>Fleet · mission status</SectionHeader>
-      <div className="flex gap-3 mb-2 text-[10px]">
-        <span><span className="font-mono" style={{ color: '#22c55e' }}>{active}</span> active</span>
-        <span><span className="font-mono" style={{ color: '#3b82f6' }}>{idle}</span> idle</span>
-        <span><span className="font-mono" style={{ color: '#facc15' }}>{returning}</span> rtb</span>
-        <span><span className="font-mono text-zinc-500">{grounded}</span> gnd</span>
-        <span className="text-zinc-600">/ {total}</span>
-      </div>
-      <div className="text-[10px] leading-relaxed max-h-20 overflow-y-auto">
-        {events.length === 0 ? (
-          <div className="text-zinc-600">No events for your access level</div>
-        ) : (
-          events.map((e) => (
-            <div key={e.id} className="flex gap-2"
-              style={{ color: e.type === 'optimizer_rerun' ? '#c084fc' : undefined }}>
-              <span className="text-zinc-500 font-mono flex-shrink-0">{e.ts}</span>
-              <span className={e.type === 'optimizer_rerun' ? '' : 'text-zinc-200'}>{e.message}</span>
-            </div>
-          ))
-        )}
-      </div>
     </div>
   );
 }

@@ -78,6 +78,37 @@ class Mission(BaseModel):
     tightest: TightestConstraint
 
 
+class MissionRequestStatus(str, Enum):
+    pending  = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
+class MissionRequest(BaseModel):
+    id:           str
+    requested_by: str
+    status:       MissionRequestStatus = MissionRequestStatus.pending
+    submitted_at: str
+    location:     Location
+    volume:       Volume
+    duration:     int
+    notes:        Optional[str] = None
+    mission_id:   Optional[str] = None
+    reviewed_by:  Optional[str] = None
+    reviewed_at:  Optional[str] = None
+
+
+class MissionRequestCreate(BaseModel):
+    location: Location
+    volume:   Volume
+    duration: int
+    notes:    Optional[str] = None
+
+
+class MissionApprove(BaseModel):
+    tightest: Optional[TightestConstraint] = None
+
+
 class DronePosition(BaseModel):
     lat: float
     lng: float

@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .env
 algo.py
+hassan.rtf
 
 # Node
 node_modules/
