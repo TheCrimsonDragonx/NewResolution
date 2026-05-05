@@ -205,7 +205,7 @@ export default function DashboardPage() {
       <div className="flex-1 flex min-h-0">
         <NavRail active={activeNav} onChange={setActiveNav} />
         <OperationSetup mission={mission} operator={operator} />
-        <MapView drones={drones} fireZones={fireZones} simState={simState} lastOptResult={lastOptResult} />
+        <MapView drones={drones} fireZones={fireZones} simState={simState} lastOptResult={lastOptResult} missions={allMissions} operator={operator} />
       </div>
       <ResolutionPanel
         regions={regions} events={events} mission={mission}

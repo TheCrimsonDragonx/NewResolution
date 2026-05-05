@@ -42,9 +42,10 @@ const T77_ICON = L.divIcon({
 
 // ─── Live layer updater — must be a child of MapContainer ───────────────────
 
-function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
+function LiveLayers({ drones, fireZones, simState, lastOptResult, missions, operator }) {
   const map           = useMap();
   const fireRef       = useRef(null);
+  const volumeRef     = useRef(null);   // 4D operational volumes (above fire, below static)
   const staticRef     = useRef(null);   // slow-changing: regions, fire zones, corridor
   const dynamicRef    = useRef(null);   // fast-changing: drone markers + assignment lines
   const canvasRef     = useRef(null);
@@ -56,9 +57,10 @@ function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
-    canvasRef.current = L.canvas({ padding: 0.5 });
-    fireRef.current   = L.layerGroup().addTo(map);
-    staticRef.current = L.layerGroup().addTo(map);
+    canvasRef.current  = L.canvas({ padding: 0.5 });
+    fireRef.current    = L.layerGroup().addTo(map);
+    volumeRef.current  = L.layerGroup().addTo(map);
+    staticRef.current  = L.layerGroup().addTo(map);
     dynamicRef.current = L.layerGroup().addTo(map);
   }, [map]);
 
@@ -99,6 +101,68 @@ function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
 
     prevCellsRef.current = newCells;
   }, [simState]);
+
+  // 4D operational volume rectangles — rebuilds when missions list changes (~6s)
+  useEffect(() => {
+    if (!volumeRef.current) return;
+    volumeRef.current.clearLayers();
+    if (!missions || missions.length === 0) return;
+
+    const ownDroneId = operator?.assigned_drone_id ?? null;
+
+    missions.forEach(m => {
+      if (!m.location || !m.volume) return;
+      const status = (m.status || '').toLowerCase();
+      if (status === 'closed') return;
+
+      const { lat, lng } = m.location;
+      const widthM  = (m.volume.width  || 0.5) * 1852;
+      const heightM = (m.volume.height || 0.5) * 1852;
+      const halfLat = (heightM / 2) / 111320;
+      const halfLng = (widthM  / 2) / (111320 * Math.cos(lat * Math.PI / 180));
+
+      const bounds = [
+        [lat - halfLat, lng - halfLng],
+        [lat + halfLat, lng + halfLng],
+      ];
+
+      const isOwn = ownDroneId ? m.tightest?.drone === ownDroneId : false;
+
+      let color, dashArray, fillOpacity;
+      if (status === 'active') {
+        color = '#7c3aed'; dashArray = null; fillOpacity = 0.07;
+      } else if (status === 'non_conforming') {
+        color = '#f97316'; dashArray = null; fillOpacity = 0.10;
+      } else if (status === 'standby' || status === 'approved') {
+        color = '#3b82f6'; dashArray = '6 4'; fillOpacity = 0;
+      } else {
+        color = '#d4d4d8'; dashArray = '6 4'; fillOpacity = 0;
+      }
+
+      L.rectangle(bounds, {
+        color,
+        weight: isOwn ? 2.5 : 1.5,
+        fillColor: color,
+        fillOpacity,
+        dashArray: dashArray ?? undefined,
+      })
+        .bindTooltip(
+          `<b style="color:${color}">${m.id}</b><br/>${status.replace('_', ' ')} · ${m.volume.minAlt ?? 0}–${m.volume.maxAlt ?? 0} ft`,
+          { sticky: true, className: 'res-tip' }
+        )
+        .addTo(volumeRef.current);
+
+      // Permanent callsign label at top-left corner of volume
+      L.marker([lat + halfLat, lng - halfLng], {
+        icon: L.divIcon({
+          html: `<span style="color:${color};font-size:9px;font-family:monospace;font-weight:${isOwn ? 700 : 500};white-space:nowrap;text-shadow:0 0 4px #000,0 0 4px #000">${m.id}</span>`,
+          iconSize: [70, 14],
+          iconAnchor: [0, 14],
+          className: '',
+        }),
+      }).addTo(volumeRef.current);
+    });
+  }, [missions, operator]);
 
   // Static layer: regions, fire zones, corridor, manned aircraft — only rebuilds when fireZones changes (~6s)
   useEffect(() => {
@@ -192,7 +256,7 @@ function LiveLayers({ drones, fireZones, simState, lastOptResult }) {
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
-export default function MapView({ drones, fireZones, simState, lastOptResult }) {
+export default function MapView({ drones, fireZones, simState, lastOptResult, missions, operator }) {
   const windDeg   = simState?.wind_deg   ?? 225;
   const windSpeed = simState?.wind_speed ?? 20;
   const windRad   = (windDeg * Math.PI) / 180;
@@ -220,6 +284,8 @@ export default function MapView({ drones, fireZones, simState, lastOptResult }) 
           fireZones={fireZones}
           simState={simState}
           lastOptResult={lastOptResult}
+          missions={missions}
+          operator={operator}
         />
       </MapContainer>
 
@@ -259,6 +325,21 @@ export default function MapView({ drones, fireZones, simState, lastOptResult }) 
             clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
           }} />
           manned A/C
+        </div>
+        <div style={{ color: '#404040', borderTop: '1px solid #2a2a2a', marginTop: 3, paddingTop: 3 }}>
+          volumes
+        </div>
+        <div className="flex items-center gap-1.5 mb-0.5" style={{ color: '#7c3aed' }}>
+          <span className="inline-block border" style={{ width: 8, height: 5, borderColor: '#7c3aed' }} />
+          active
+        </div>
+        <div className="flex items-center gap-1.5 mb-0.5" style={{ color: '#3b82f6' }}>
+          <span className="inline-block border border-dashed" style={{ width: 8, height: 5, borderColor: '#3b82f6' }} />
+          standby
+        </div>
+        <div className="flex items-center gap-1.5 mb-1" style={{ color: '#f97316' }}>
+          <span className="inline-block border" style={{ width: 8, height: 5, borderColor: '#f97316' }} />
+          non-conforming
         </div>
         <div style={{ color: '#404040', borderTop: '1px solid #2a2a2a', paddingTop: 3 }}>
           NASA FIRMS VIIRS NRT
