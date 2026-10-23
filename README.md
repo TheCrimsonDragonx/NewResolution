@@ -1,6 +1,6 @@
 # Resolution
 ### UAS Traffic Management for Wildfire ICS Operations
-**VandyHacks Drydock 2025 — NASA TX 16.3: Nontraditional Aviation Operations for Wildfire Response**
+**VandyHacks Drydock 2026 — NASA TX 16.3: Nontraditional Aviation Operations for Wildfire Response**
 
 ---
 
